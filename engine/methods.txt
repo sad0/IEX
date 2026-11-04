@@ -1,0 +1,35 @@
+# Engine member functions bound as Lua methods of the engine class tables (tools/engine/build_desc.py --methods).
+# <Class> <luaName> <target> <ret> [arg...]
+#   target: mangled symbol of the engine description (direct call), or vt:<symbol> whose value is a vtable byte
+#           offset (virtual call through the object's vtable)
+#   ret:    void bool i8 u8 i16 u16 i32 u32 i64 ptr obj:<Type>
+#   args:   bool i8 u8 i16 u16 i32 u32 i64 ptr point (CPoint by value) pointref (CPoint const&: a CPoint object or {x=, y=})
+#           data:<Type> (struct by value, first argument only, <= 64 bytes); a leading `static` = no `this`
+# Only integer-class arguments and results (no float/double, no struct results). `this` is implicit.
+# Methods the engine binds itself through tolua (worldScreen:StepDialog(), storeScreen:GetStoreName(),
+# game:GetPartyGold()...) need no record: IEX objects reach them through the tolua bridge (lua_objects.cpp).
+CInfGame UnselectAll _ZN8CInfGame11UnselectAllEv void
+CInfGame SelectCharacter _ZN8CInfGame15SelectCharacterEih i32 i32 bool
+CInfinity SetViewPosition _ZN9CInfinity15SetViewPositionEiih i32 i32 i32 bool
+CGameArea OnActionButtonClickGround _ZN9CGameArea25OnActionButtonClickGroundERK6CPoint void pointref
+CGameObject virtual_OnActionButton vt:IEX_VtOff_OnActionButton void pointref
+# Spell lists (Bubb's Spell Menu): lists are new CGameButtonList objects of new CButtonData records (the caller frees
+# them: EEex_Utility_FreeCPtrList); ReadySpell / ReadyOffInternalList take the CButtonData by value.
+CGameSprite GetQuickButtons _ZN11CGameSprite15GetQuickButtonsEth obj:CGameButtonList u16 u8
+CGameSprite GetInternalButtonList _ZN11CGameSprite21GetInternalButtonListEv obj:CGameButtonList
+CGameSprite ReadySpell _ZN11CGameSprite10ReadySpellE11CButtonDatah void data:CButtonData u8
+CGameSprite ReadyOffInternalList _ZN11CGameSprite20ReadyOffInternalListE11CButtonDatah void data:CButtonData u8
+CInfButtonArray SetQuickSlot _ZN15CInfButtonArray12SetQuickSlotEP11CButtonDataii void static ptr i32 i32
+CInfGame SetState _ZN8CInfGame8SetStateEsi void i16 i32
+# EEex binds the full C++ signature; the engine's own tolua TogglePauseGame takes one boolean. Native records are
+# looked up before tolua functions on IEX objects, so both calls work (worldScreen:... keeps the tolua one).
+CScreenWorld TogglePauseGame _ZN12CScreenWorld15TogglePauseGameEhhihh u8 u8 u8 i32 u8 u8
+# Caster level of a spell (EEex_Sprite_GetCasterLevelForSpell): the CSpell argument is a 16-byte {CRes*, CResRef}
+# built by IEX_CasterLevel's Lua side; the flag adds the wild mage level roll.
+CGameSprite IEX_GetCasterLevel _ZN11CGameSprite14GetCasterLevelEPK6CSpelli i16 ptr i32
+# EEex_Object_AddToArea: CGameObject::AddToArea(area, point, z, listType) through the object's vtable.
+CGameObject virtual_AddToArea vt:IEX_VtOff_AddToArea void ptr pointref i32 u8
+# Terrain table for CGameArea::CheckLOS (SadoEE chests in the ground bar): a pointer into the sprite.
+CGameAIBase virtual_GetVisibleTerrainTable vt:IEX_VtOff_GetVisibleTerrainTable ptr
+# Line of sight between two points for a terrain table (SadoEE chests in the ground bar, passive traps).
+CGameArea CheckLOS _ZN9CGameArea8CheckLOSERK6CPointS2_PKhhs i32 pointref pointref ptr u8 i16

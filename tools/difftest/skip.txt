@@ -1,0 +1,7 @@
+# Cases that crash the engine natively under EEex (added by run.ps1 from the last DIFFT|TRACE line).
+# Both sides skip them; each one is still a finding (see docs/DIFFTEST_*.md).
+area.GetAllOfTypeInRange
+step:op400
+step.afterAll.opcounts
+step.afterAll.marshalExports
+step.afterAll.scriptL0

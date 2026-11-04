@@ -1,0 +1,13 @@
+menu
+{
+	name "ATK_TICK"
+	ignoreesc
+
+	-- Its enabled check runs every frame and drives the attack-move probe (M_ATKPRB.lua).
+	label
+	{
+		name "ATKLABEL"
+		area 0 0 0 0
+		enabled "ATK_Tick()"
+	}
+}

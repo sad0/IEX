@@ -1,0 +1,32 @@
+menu
+{
+	name "DIFFT_TICK"
+	ignoreesc
+
+	-- Its enabled check runs every frame and drives the differential test probe (M_DIFFT.lua).
+	label
+	{
+		name "DIFFTLABEL"
+		area 0 0 0 0
+		enabled "DiffT_Tick()"
+	}
+	-- A tiny invisible list: its rows are drawn every frame (list render listeners / hooks).
+	list
+	{
+		column
+		{
+			width 100
+			label
+			{
+				area 0 0 -1 -1
+				text lua "DiffT_ListText(rowNumber)"
+			}
+		}
+		name "DIFFTLIST"
+		area 0 0 4 8
+		rowheight 4
+		table "difftListRows"
+		var difftListRow
+		hidehighlight
+	}
+}

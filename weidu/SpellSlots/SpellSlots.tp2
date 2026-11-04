@@ -1,0 +1,39 @@
+// SpellSlots: wizard and priest spells in slots 51-99 (SPWI<level>51-99, SPPR<level>51-99) become learnable,
+// choosable at chargen / level-up and given to priests, like slots 01-50.
+// The engine stops its class spell lists at slot 50 (CRuleTables::GetMageSpell / GetPriestSpell); M_SPSLOT.lua moves
+// that bound to 99 at game start, through IEX (native hook point "spellSlots99", Windows + Linux 2.7.3) or, without
+// IEX, through EEex (Windows 2.6.6 / 2.7.3 byte patch). Install it right after IEX / EEex, before spell mods,
+// ClassSpellTool mods and SFO mods.
+// Note: this does not change WeiDU's own ADD_SPELL, which still fills slots 01-50 only.
+BACKUP ~weidu_external/backup/SpellSlots~
+AUTHOR ~sad0 (https://github.com/sad0/IEX-releases)~
+VERSION ~v0.1.0~
+
+BEGIN ~Spell slots 51-99 (needs IEX or EEex)~
+REQUIRE_PREDICATE GAME_IS ~bgee bg2ee eet~ ~Only for BGEE, BG2EE and EET.~
+REQUIRE_PREDICATE (MOD_IS_INSTALLED ~IEX.tp2~ ~0~ OR MOD_IS_INSTALLED ~EEex.tp2~ ~0~)
+  ~Install IEX or EEex first: the engine change is made by one of them at game start.~
+
+// Priests receive every spell up to the row's count (CGameSprite::AddNewSpellsPriest): 99 per level.
+COPY_EXISTING ~spells.2da~ ~override~
+  COUNT_2DA_COLS spsl_cols
+  COUNT_2DA_ROWS spsl_cols spsl_rows  // MAGE, PRIEST (the header line has one entry less)
+  FOR (spsl_r = 0; spsl_r < spsl_rows; ++spsl_r) BEGIN
+    FOR (spsl_c = 1; spsl_c < spsl_cols; ++spsl_c) BEGIN
+      SET_2DA_ENTRY_LATER ~spsl~ spsl_r spsl_c ~99~
+    END
+  END
+  SET_2DA_ENTRIES_NOW ~spsl~ spsl_cols
+  PRETTY_PRINT_2DA
+BUT_ONLY
+
+// The engine's own spells in slots 51-99 that HIDESPL.2DA does not hide yet (NPC-only / internal), BGEE + BG2EE
+// 2.6.6 / 2.7.3. Spells other mods placed there on purpose (SFO's ui_extra_spells) are left alone.
+ACTION_FOR_EACH spsl_res IN SPPR599 SPPR698 SPPR699 SPWI961 SPWI962 SPWI963 SPWI964 SPWI965 SPWI975 BEGIN
+  ACTION_IF FILE_EXISTS_IN_GAME ~%spsl_res%.spl~ BEGIN
+    // IS_HIDDEN IS_FINAL IS_REMOVED (extra values past the header are ignored by the engine)
+    APPEND ~hidespl.2da~ ~%spsl_res%    1    0    0~ UNLESS ~^%spsl_res%[ %TAB%]~
+  END
+END
+
+COPY ~SpellSlots/M_SPSLOT.lua~ ~override~

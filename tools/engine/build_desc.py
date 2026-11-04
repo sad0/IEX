@@ -1,0 +1,231 @@
+"""Convert a types JSON (engine/types/<platform>-<game>-<version>.types.json) into the compact engine
+description IEX reads at runtime (<platform>-<game>-<version>.iexd).
+
+Usage: python -I build_desc.py <types.json> <out.iexd> [--binary <exe/elf>] [--symbols <symbols.json>]
+                                [--hooks <hook_targets.txt>] [--min-confidence high|medium|low]
+
+.iexd format (one record per line, '#' comments):
+    build platform=<win64|linux64> [timestamp=<hex> imagesize=<hex>] [buildid=<hex>]
+    symbol <mangled name> <image-relative address hex>
+    callsite <image-relative address of the E8 opcode hex> <mangled target>
+    const <name> <value hex>
+    type <Name> <size hex> [base=<Name>@<offset hex>]...
+    field <name> <offset hex> <kind>
+    method <Class> <luaName> fn:<rva hex>|vt:<vtable offset hex> <ret> [arg...]   (from --methods <methods.txt>)
+kinds:
+    i8 u8 i16 u16 i32 u32 i64 u64 f32 f64 bool
+    resref            8 inline chars (CResRef)
+    cstring           CString (pointer to a NUL-terminated char buffer)
+    charptr           char* / const char*
+    chars:<N>         inline char[N]
+    struct:<Type>     embedded object
+    ptr:<Type>        pointer to object (ptr:void = raw address)
+    list:<Type>       embedded CTypedPtrList<CPtrList, Type*>
+    array:<N>:<kind>  inline array of N elements of <kind>
+"""
+import json
+import re
+import struct
+import sys
+
+PRIMS = {
+    'int8': 'i8', 'uint8': 'u8', 'int16': 'i16', 'uint16': 'u16', 'int32': 'i32', 'uint32': 'u32',
+    'int64': 'i64', 'uint64': 'u64', 'float': 'f32', 'double': 'f64', 'bool': 'bool',
+    'char': 'i8', 'unsigned char': 'u8', 'short': 'i16', 'unsigned short': 'u16', 'int': 'i32',
+    'unsigned int': 'u32', 'BYTE': 'u8', 'WORD': 'u16', 'DWORD': 'u32', 'long': 'i32',
+}
+
+
+def kind_of(ctype, known):
+    t = ctype.strip()
+    t = re.sub(r'\s*\(.*\)$', '', t)          # "uint32 (strref)" -> "uint32"
+    t = re.sub(r'^const\s+', '', t)
+    m = re.match(r'^(.*)\[(\d+)\]$', t)
+    if m:
+        inner, n = m.group(1).strip(), int(m.group(2))
+        if inner == 'char':
+            return f'chars:{n}'
+        k = kind_of(inner, known)
+        return f'array:{n}:{k}' if k else None
+    if t in PRIMS:
+        return PRIMS[t]
+    if t == 'CResRef':
+        return 'resref'
+    if t == 'CString':
+        return 'cstring'
+    if t in ('char*', 'unsigned char*'):
+        return 'cstring'  # same handle as CString (pointer to a NUL-terminated buffer): :get() / :set()
+    m = re.match(r'^CTypedPtrList<\s*CPtrList\s*,\s*([\w:]+)\s*\*?\s*>$', t)
+    if m:
+        return f'list:{m.group(1)}'
+    if t.endswith('*'):
+        target = t[:-1].strip()
+        return f'ptr:{target}' if target in known else 'ptr:void'
+    if t in known:
+        return f'struct:{t}'
+    return None
+
+
+def pe_info(data):
+    pe = struct.unpack_from('<I', data, 0x3c)[0]
+    nsec = struct.unpack_from('<H', data, pe + 6)[0]
+    opt = struct.unpack_from('<H', data, pe + 20)[0]
+    sections = [struct.unpack_from('<8sIIII', data, pe + 24 + opt + i * 40) for i in range(nsec)]
+    code = [(va, raw, min(vsize, rsize)) for name, vsize, va, rsize, raw in sections if name.startswith(b'.text')]
+    return {'timestamp': struct.unpack_from('<I', data, pe + 8)[0],
+            'imagesize': struct.unpack_from('<I', data, pe + 24 + 56)[0]}, code
+
+
+def elf_info(data):
+    shoff, = struct.unpack_from('<Q', data, 0x28)
+    shentsize, shnum, shstrndx = struct.unpack_from('<HHH', data, 0x3A)
+    secs = [struct.unpack_from('<IIQQQQIIQQ', data, shoff + i * shentsize) for i in range(shnum)]
+    stroff = secs[shstrndx][4]
+    name = lambda o: data[stroff + o:data.index(bytes(1), stroff + o)].decode()
+    by = {name(s[0]): s for s in secs}
+    bid = by.get('.note.gnu.build-id')
+    build_id = None
+    if bid:
+        namesz, descsz, _ = struct.unpack_from('<III', data, bid[4])
+        start = bid[4] + 12 + ((namesz + 3) & ~3)
+        build_id = data[start:start + descsz].hex()
+    text = by['.text']
+    return {'buildid': build_id}, [(text[3], text[4], text[5])]
+
+
+CALL_OPCODE = bytes([0xE8])
+
+
+def find_callsites(code_ranges, data, targets):
+    """Direct `call rel32` (E8) instructions whose destination is one of `targets` ({rva: name})."""
+    found = []
+    for va, raw, size in code_ranges:
+        pos = data.find(CALL_OPCODE, raw, raw + size - 4)
+        while pos != -1:
+            rva = va + (pos - raw)
+            dest = rva + 5 + struct.unpack_from('<i', data, pos + 1)[0]
+            if dest in targets:
+                found.append((rva, targets[dest]))
+            pos = data.find(CALL_OPCODE, pos + 1, raw + size - 4)
+    return found
+
+
+def option(name, default=None):
+    if name in sys.argv:
+        i = sys.argv.index(name)
+        return sys.argv[i + 1]
+    return default
+
+
+def main():
+    src, out = sys.argv[1:3]
+    types = json.load(open(src, encoding='utf-8'))
+    meta = types.get('_meta', {})
+    known = {k for k in types if not k.startswith('_')}
+    lines = [f"# generated by tools/engine/build_desc.py from {src.replace(chr(92), '/').split('/')[-1]}",
+             f"# {meta.get('binary', '')}"]
+    skipped = []
+    for name in sorted(known):
+        t = types[name]
+        size = t.get('size') or '0x0'
+        if not str(size).startswith('0x'):
+            size = '0x0'
+        bases = []
+        for b in t.get('bases', []):
+            bname, _, boff = b.partition('@')
+            typed = re.match(r'^CTypedPtrList<\s*CPtrList\s*,\s*([\w:]+)\s*\*\s*>$', bname.strip())
+            if typed:
+                # A list class (e.g. CGameEffectList): a CPtrList whose node data are objects of one type.
+                bases.append(f'base=CPtrList@{boff or "0x0"}')
+                if typed.group(1) in known:
+                    bases.append(f'elem={typed.group(1)}')
+            elif bname in known:
+                bases.append(f'base={bname}@{boff or "0x0"}')
+        lines.append(' '.join(['type', name, size] + bases))
+        for f in t.get('fields', []):
+            k = kind_of(f['ctype'], known)
+            if not k:
+                skipped.append(f"{name}.{f['name']} ({f['ctype']})")
+                continue
+            lines.append(f"field {f['name']} {f['offset']} {k}")
+
+    binary, symfile, hookfile = option('--binary'), option('--symbols'), option('--hooks')
+    levels = {'high': 0, 'medium': 1, 'low': 2}
+    max_level = levels[option('--min-confidence', 'high')]
+    data = code = None
+    if binary:
+        data = open(binary, 'rb').read()
+        if data[:2] == b'MZ':
+            info, code = pe_info(data)
+            lines.insert(2, f"build platform=win64 timestamp={info['timestamp']:#x} imagesize={info['imagesize']:#x}")
+        else:
+            info, code = elf_info(data)
+            lines.insert(2, f"build platform=linux64 buildid={info['buildid']}")
+    symbols = {}
+    if symfile:
+        raw = json.load(open(symfile, encoding='utf-8'))
+        items = raw['functions'] + raw.get('objects', []) if isinstance(raw, dict) else raw
+        for it in items:
+            if levels.get(it.get('confidence', 'high'), 2) <= max_level and it['name'] not in symbols:
+                symbols[it['name']] = int(it['addr'], 16)
+    # --verified <json> (repeatable): hand-verified entries ({name, kind, linux, win, status}) override the
+    # transferred table. Only plain symbol names (no spaces) of functions and globals are used.
+    is_win = binary and data[:2] == b'MZ'
+    for i, arg in enumerate(sys.argv):
+        if arg != '--verified':
+            continue
+        for v in json.load(open(sys.argv[i + 1], encoding='utf-8')):
+            addr = v.get('win' if is_win else 'linux')
+            if (v.get('kind') in ('function', 'global') and v.get('status') in ('verified', 'corrected')
+                    and ' ' not in v['name'] and '/' not in v['name']
+                    and isinstance(addr, str) and addr.startswith('0x')):
+                symbols[v['name']] = int(addr.split()[0], 16)  # "0x1d1c80 (C1 == C2)" -> 0x1d1c80
+    # --symbol name=rva (repeatable): add or correct a symbol by hand (e.g. data globals not in the table).
+    for i, arg in enumerate(sys.argv):
+        if arg == '--symbol':
+            name, _, rva = sys.argv[i + 1].partition('=')
+            symbols[name] = int(rva, 16)
+    if symbols:
+        lines += [f'symbol {n} {a:#x}' for n, a in sorted(symbols.items())]
+    # --const name=value (repeatable): build-specific numbers (vtable shapes...) the C++ code reads by name.
+    for i, arg in enumerate(sys.argv):
+        if arg == '--const':
+            name, _, value = sys.argv[i + 1].partition('=')
+            lines.append(f'const {name} {int(value, 0):#x}')
+    # --methods <file>: engine member functions bound as Lua methods (engine/methods.txt). The target symbol must
+    # be in the table (a vt:<name> target names a symbol whose value is the vtable byte offset).
+    methfile = option('--methods')
+    if methfile:
+        bound = 0
+        for line in open(methfile, encoding='utf-8'):
+            parts = line.split()
+            if not parts or parts[0].startswith('#'):
+                continue
+            cls, lname, target, ret, args = parts[0], parts[1], parts[2], parts[3], parts[4:]
+            virtual = target.startswith('vt:')
+            sym = target[3:] if virtual else target
+            if sym not in symbols:
+                print('  method without symbol:', cls, lname, sym)
+                continue
+            lines.append(' '.join(['method', cls, lname, f"{'vt' if virtual else 'fn'}:{symbols[sym]:#x}", ret] + args))
+            bound += 1
+        print(f'{bound} methods')
+    if hookfile and data:
+        wanted = [l.strip() for l in open(hookfile) if l.strip() and not l.startswith('#')]
+        targets = {symbols[n]: n for n in wanted if n in symbols}
+        for n in wanted:
+            if n not in symbols:
+                print('  hook target without symbol:', n)
+        sites = find_callsites(code, data, targets)
+        lines += [f'callsite {rva:#x} {name}' for rva, name in sites]
+        print(f'{len(sites)} call sites for {len(targets)} hook targets')
+
+    with open(out, 'w', encoding='utf-8', newline='\n') as fh:
+        fh.write('\n'.join(lines) + '\n')
+    print(f'{len(known)} types -> {out}; skipped {len(skipped)} fields')
+    for s in skipped:
+        print('  skipped', s)
+
+
+if __name__ == '__main__':
+    main()

@@ -1,0 +1,13 @@
+menu
+{
+	name "STK_TICK"
+	ignoreesc
+
+	-- Its enabled check runs every frame and drives the StickLuaFunctions probe (M_STKPRB.lua).
+	label
+	{
+		name "STKLABEL"
+		area 0 0 0 0
+		enabled "STK_Tick()"
+	}
+}

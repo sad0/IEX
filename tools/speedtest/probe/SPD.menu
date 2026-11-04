@@ -1,0 +1,13 @@
+menu
+{
+	name "SPD_TICK"
+	ignoreesc
+
+	-- Its enabled check runs every drawn frame and drives the speed test probe (M_IEXSPD.lua).
+	label
+	{
+		name "SPDLABEL"
+		area 0 0 0 0
+		enabled "SPD_Tick()"
+	}
+}

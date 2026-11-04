@@ -1,0 +1,6 @@
+local a=EEex_Area_GetVisible() IEX_Camera_ZoomLimits(0.25, 1.4) IEX_Camera_SetZoom(a, 1.0) IEX_Camera_SetView(a, 200, 2300) IEX_SetVSync(0) IEX_SetFrameRate(1000)
+sleep 3
+HD_Scroll(8000, 4)
+sleep 12
+HD_Out('STATS', IEX_HdTiles_Stats())
+sleep 3

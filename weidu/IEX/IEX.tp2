@@ -1,0 +1,152 @@
+// IEX (Infinity Extender): WeiDU installer.
+// The IEX folder itself is the runtime folder: IEX/IEX_Main.lua, IEX/*.lua and IEX/engine/*.iexd are read from here
+// at game start. Installing copies the platform binaries next to the game executable and records IEX in WeiDU.log,
+// so mods can test `MOD_IS_INSTALLED ~IEX/IEX.TP2~ ~0~`.
+BACKUP ~weidu_external/backup/IEX~
+AUTHOR ~sad0 (https://github.com/sad0/IEX-releases)~
+VERSION ~v0.4.0~
+
+ALWAYS
+  // Data tables and script names every EEex-dependent mod expects. Idempotent: existing files and IDS entries
+  // are left alone, so both components can run it.
+  DEFINE_ACTION_FUNCTION ~IEX_INSTALL_EEEX_DATA~ BEGIN
+// EEex-compatible data that mods install against (numbers are the ones EEex-built mods compile with).
+// Extended stats (opcode 401): mods append "<STATS.IDS name> <min> <max> <default>" rows; ids > 202 go to STATS.IDS.
+ACTION_IF NOT FILE_EXISTS_IN_GAME ~x-stats.2da~ BEGIN
+  <<<<<<<< .../iex-inlined/x-stats.2da
+2DA V1.0
+0
+        MIN     MAX     DEFAULT
+>>>>>>>>
+  COPY ~.../iex-inlined/x-stats.2da~ ~override/X-STATS.2DA~
+END
+
+// IEX class spell lists (native switch spellLists, lua/IEX_SpellLists.lua): spells past the SPWI/SPPR slots.
+// Mods append "<resref> <type 1 priest / 2 wizard> <level>" rows, in list order.
+ACTION_IF NOT FILE_EXISTS_IN_GAME ~iexsplst.2da~ BEGIN
+  <<<<<<<< .../iex-inlined/iexsplst.2da
+2DA V1.0
+*
+         TYPE    LEVEL
+>>>>>>>>
+  COPY ~.../iex-inlined/iexsplst.2da~ ~override/IEXSPLST.2DA~
+END
+
+// Per-kit weapon table (one row per KITLIST.2DA kit, one 0/1 column per weapon category), edited by kit mods.
+ACTION_IF NOT FILE_EXISTS_IN_GAME ~x-clserg.2da~ BEGIN
+  <<<<<<<< .../iex-inlined/x-clserg.2da
+2DA V1.0
+0
+                    BOW    DAGGER    MACE    SLING    SMSWORD    BGSWORD    HAMMER    MSTAR    FLAIL    DART    AXE    STAFF    XBOW    FIST    SPEAR    POLEARM
+>>>>>>>>
+  COPY ~.../iex-inlined/x-clserg.2da~ ~override/X-CLSERG.2DA~
+  COPY_EXISTING ~kitlist.2da~ ~override~
+    READ_2DA_ENTRIES_NOW ~iex_kits~ 9
+  BUT_ONLY
+  OUTER_FOR (iex_i = 0; iex_i < iex_kits; ++iex_i) BEGIN
+    OUTER_PATCH ~~ BEGIN
+      READ_2DA_ENTRY_FORMER ~iex_kits~ iex_i 0 ~iex_row~
+      READ_2DA_ENTRY_FORMER ~iex_kits~ iex_i 1 ~iex_kit~
+    END
+    // Data rows only (the column-name line has as many entries), without the RESERVE placeholder.
+    ACTION_IF (IS_AN_INT iex_row) AND NOT (~%iex_kit%~ STRING_EQUAL_CASE ~RESERVE~) BEGIN
+      APPEND ~x-clserg.2da~ ~%iex_kit% 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0~
+    END
+  END
+  COPY_EXISTING ~x-clserg.2da~ ~override~
+    PRETTY_PRINT_2DA
+  BUT_ONLY
+END
+
+// Script actions, triggers and object functions.
+APPEND ~action.ids~ ~472 EEex_LuaAction(S:Chunk*)~ UNLESS ~EEex_LuaAction(~
+APPEND ~action.ids~ ~473 EEex_MatchObject(S:Chunk*)~ UNLESS ~EEex_MatchObject(~
+APPEND ~action.ids~ ~474 EEex_SetTarget(S:Name*,O:Target*)~ UNLESS ~EEex_SetTarget(~
+APPEND ~action.ids~ ~476 EEex_SpellObjectOffset(O:Target*,I:Spell*Spell,P:Offset*)~ UNLESS ~EEex_SpellObjectOffset(~
+APPEND ~action.ids~ ~476 EEex_SpellObjectOffsetRES(S:RES*,O:Target*,P:Offset*)~ UNLESS ~EEex_SpellObjectOffsetRES(~
+APPEND ~action.ids~ ~477 EEex_SpellObjectOffsetNoDec(O:Target*,I:Spell*Spell,P:Offset*)~ UNLESS ~EEex_SpellObjectOffsetNoDec(~
+APPEND ~action.ids~ ~477 EEex_SpellObjectOffsetNoDecRES(S:RES*,O:Target*,P:Offset*)~ UNLESS ~EEex_SpellObjectOffsetNoDecRES(~
+APPEND ~action.ids~ ~478 EEex_ForceSpellObjectOffset(O:Target*,I:Spell*Spell,P:Offset*)~ UNLESS ~EEex_ForceSpellObjectOffset(~
+APPEND ~action.ids~ ~478 EEex_ForceSpellObjectOffsetRES(S:RES*,O:Target*,P:Offset*)~ UNLESS ~EEex_ForceSpellObjectOffsetRES(~
+APPEND ~action.ids~ ~479 EEex_ReallyForceSpellObjectOffset(O:Target*,I:Spell*Spell,P:Offset*)~ UNLESS ~EEex_ReallyForceSpellObjectOffset(~
+APPEND ~action.ids~ ~479 EEex_ReallyForceSpellObjectOffsetRES(S:RES*,O:Target*,P:Offset*)~ UNLESS ~EEex_ReallyForceSpellObjectOffsetRES(~
+APPEND ~trigger.ids~ ~0x410D EEex_HasDispellableEffect(O:Object*)~ UNLESS ~EEex_HasDispellableEffect(~
+APPEND ~trigger.ids~ ~0x410E EEex_LuaTrigger(S:Chunk*)~ UNLESS ~EEex_LuaTrigger(~
+APPEND ~trigger.ids~ ~0x410F EEex_IsImmuneToOpcode(O:Object*,I:Opcode*)~ UNLESS ~EEex_IsImmuneToOpcode(~
+APPEND ~trigger.ids~ ~0x4110 EEex_MatchObject(S:Chunk*)~ UNLESS ~EEex_MatchObject(~
+APPEND ~object.ids~ ~115 EEex_LuaObject~ UNLESS ~EEex_LuaObject~
+APPEND ~object.ids~ ~116 EEex_MatchObject~ UNLESS ~EEex_MatchObject~
+APPEND ~object.ids~ ~117 EEex_Target~ UNLESS ~EEex_Target~
+APPEND ~object.ids~ ~118 EEex_LuaDecode~ UNLESS ~EEex_LuaDecode~
+CLEAR_IDS_MAP
+  END
+
+  // IEX's loader settings, in the InfinityLoader.ini format EEex mods read and write (IEX's own file: IEX reads
+  // [General] LuaPatchMode and LogFile, see docs/COMPAT_RULES.md). Created once; mods may change it afterwards.
+  DEFINE_ACTION_FUNCTION ~IEX_INSTALL_LOADER_INI~ BEGIN
+    ACTION_IF NOT FILE_EXISTS ~InfinityLoader.ini~ BEGIN
+      <<<<<<<< .../iex-inlined/InfinityLoader.ini
+; IEX (Infinity Extender) settings, in the InfinityLoader.ini format that EEex mods read and write.
+; IEX reads [General]:
+;   LuaPatchMode: INTERNAL (default) or EXTERNAL / REPLACE_INTERNAL_WITH_EXTERNAL = the Lua io, os and bit
+;     libraries for mods (what EEex's LuaJIT mode gives them; IEX keeps the game's own Lua 5.2).
+;   LogFile: file (in the game folder) that receives a copy of every Lua print() line.
+; LuaLibrary and LuaVersionExternal are kept for mods that check them; IEX does not load another Lua.
+
+[General]
+LuaPatchMode=INTERNAL
+LuaLibrary=
+LuaVersionExternal=
+LogFile=
+>>>>>>>>
+      COPY ~.../iex-inlined/InfinityLoader.ini~ ~InfinityLoader.ini~
+    END
+  END
+  // The EEex options screen (IEX's own menu file).
+  DEFINE_ACTION_FUNCTION ~IEX_INSTALL_UI~ BEGIN
+    COPY ~IEX/ui~ ~override~
+  END
+END
+
+BEGIN ~IEX core (EEex-compatible engine extender)~
+DESIGNATED 0
+LABEL ~IEX-Core~
+REQUIRE_PREDICATE (GAME_IS ~bg2ee eet~) ~IEX supports BG2EE and EET 2.7.3 only.~
+REQUIRE_PREDICATE (NOT MOD_IS_INSTALLED ~EEEX/EEEX.TP2~ ~0~) ~Uninstall EEex first: IEX replaces it.~
+
+ACTION_IF (FILE_EXISTS ~Baldur.exe~ OR FILE_EXISTS ~BaldurII.exe~ OR FILE_EXISTS ~SiegeOfDragonspear.exe~) BEGIN
+  // Windows: start the game with IEXLauncher.exe.
+  COPY ~IEX/bin/win64/IEX.dll~ ~IEX.dll~
+       ~IEX/bin/win64/IEXLauncher.exe~ ~IEXLauncher.exe~
+END ELSE BEGIN
+  // Linux: start the game with iex-launch.sh (LD_PRELOAD of libiex.so).
+  COPY ~IEX/bin/linux64/libiex.so~ ~libiex.so~
+       ~IEX/bin/linux64/iex-launch.sh~ ~iex-launch.sh~
+  AT_NOW ~chmod +x iex-launch.sh libiex.so~
+END
+
+LAF ~IEX_INSTALL_EEEX_DATA~ END
+LAF ~IEX_INSTALL_LOADER_INI~ END
+LAF ~IEX_INSTALL_UI~ END
+
+// For games where IEX core was installed before these tables existed: adds them without reinstalling core
+// (a core reinstall would uninstall and reinstall every mod installed after it).
+BEGIN ~EEex-compatible data tables and script IDS (update of an older IEX core install)~
+DESIGNATED 1
+LABEL ~IEX-Data~
+REQUIRE_PREDICATE (MOD_IS_INSTALLED ~IEX/IEX.TP2~ ~0~) ~Install IEX core first.~
+LAF ~IEX_INSTALL_EEEX_DATA~ END
+LAF ~IEX_INSTALL_LOADER_INI~ END
+LAF ~IEX_INSTALL_UI~ END
+
+// What EEex's LuaJIT component gives mods: the Lua io / os libraries (and LuaJIT's bit library). IEX keeps the game's
+// Lua 5.2 and adds these libraries; mods that test for that mode (EEex Remote Console, BuffBot) read the same lines.
+BEGIN ~Lua io, os and bit libraries for mods (EEex LuaJIT mode)~
+DESIGNATED 2
+LABEL ~IEX-LuaLibraries~
+REQUIRE_PREDICATE (MOD_IS_INSTALLED ~IEX/IEX.TP2~ ~0~) ~Install IEX core first.~
+LAF ~IEX_INSTALL_LOADER_INI~ END
+COPY ~InfinityLoader.ini~ ~InfinityLoader.ini~
+  REPLACE_TEXTUALLY ~^LuaPatchMode=[^%WNL%%MNL%%LNL%]*~ ~LuaPatchMode=REPLACE_INTERNAL_WITH_EXTERNAL~
+  REPLACE_TEXTUALLY ~^LuaLibrary=[^%WNL%%MNL%%LNL%]*~ ~LuaLibrary=lua51.dll~
+  REPLACE_TEXTUALLY ~^LuaVersionExternal=[^%WNL%%MNL%%LNL%]*~ ~LuaVersionExternal=5.1~

@@ -1,0 +1,274 @@
+-- IEX options screen (the EEex options screen mods register tabs in: EEex_Options_AddTab). Lua side:
+-- IEX/EEex_OptionsUI.lua; areas are set when the screen opens (IEXOpt_Layout), centered on the screen.
+-- List / edit variable names have no '_' (the engine cuts them there).
+
+menu
+{
+	name 'EEex_Options'
+	modal
+	onopen "IEXOpt_OnOpen()"
+	onclose "IEXOpt_OnClose()"
+
+	-- the world behind, darkened
+	label
+	{
+		name 'IEXOPT_DIM'
+		area 0 0 8000 8000
+		fill 0 0 0 150
+	}
+	label
+	{
+		name 'IEXOPT_PANEL'
+		area 0 0 0 0
+		fill 0 0 0 255
+	}
+	label { name 'IEXOPT_BT' area 0 0 0 0 fill 150 150 150 255 }
+	label { name 'IEXOPT_BB' area 0 0 0 0 fill 150 150 150 255 }
+	label { name 'IEXOPT_BL' area 0 0 0 0 fill 150 150 150 255 }
+	label { name 'IEXOPT_BR' area 0 0 0 0 fill 150 150 150 255 }
+	label
+	{
+		name 'IEXOPT_TITLE'
+		area 0 0 0 0
+		text lua "IEXOpt_Title()"
+		text style "normal"
+		text point 16
+		text align center center
+	}
+	button
+	{
+		name 'IEXOPT_CLOSE'
+		area 0 0 0 0
+		text "X"
+		text style "normal"
+		text point 20
+		text align center center
+		action "EEex_Options_Close()"
+	}
+	label { name 'IEXOPT_HSEP' area 0 0 0 0 fill 90 90 90 255 }
+	label { name 'IEXOPT_VSEP1' area 0 0 0 0 fill 90 90 90 255 }
+	label { name 'IEXOPT_VSEP2' area 0 0 0 0 fill 90 90 90 255 }
+
+	-- tabs (left)
+	list
+	{
+		column
+		{
+			width 100
+			label
+			{
+				area 4 0 -1 -1
+				text lua "IEXOpt_TabText(rowNumber)"
+				text style "normal"
+				text align left center
+			}
+		}
+		name 'IEXOPT_TABS'
+		area 0 0 0 0
+		rowheight 36
+		table "iexOptTabs"
+		var iexOptTab
+		scrollbar 'GUISCRC'
+		action "IEXOpt_TabClick()"
+	}
+
+	-- the tab's columns of options (middle): label | switch, value field or key
+	list
+	{
+		column
+		{
+			width 66
+			label
+			{
+				area 4 0 -1 -1
+				text lua "IEXOpt_RowText(1, rowNumber)"
+				text style "normal"
+				text align left center
+			}
+		}
+		column
+		{
+			width 34
+			label
+			{
+				area 0 0 -1 -1
+				enabled "IEXOpt_RowKind(1, rowNumber) == 'toggle'"
+				bam ROUNDBUT
+				align center center
+				frame lua "IEXOpt_RowFrame(1, rowNumber)"
+			}
+			label
+			{
+				area 0 0 -1 -1
+				enabled "IEXOpt_RowHasValue(1, rowNumber)"
+				text lua "IEXOpt_RowValue(1, rowNumber)"
+				text style "normal"
+				text align left center
+			}
+		}
+		name 'IEXOPT_COL1'
+		area 0 0 0 0
+		rowheight 37
+		table "iexOptCol1"
+		var iexOptRow1
+		scrollbar 'GUISCRC'
+		action "IEXOpt_RowClick(1)"
+		actionAlt "IEXOpt_RowReset(1)"
+	}
+	list
+	{
+		column
+		{
+			width 66
+			label
+			{
+				area 4 0 -1 -1
+				text lua "IEXOpt_RowText(2, rowNumber)"
+				text style "normal"
+				text align left center
+			}
+		}
+		column
+		{
+			width 34
+			label
+			{
+				area 0 0 -1 -1
+				enabled "IEXOpt_RowKind(2, rowNumber) == 'toggle'"
+				bam ROUNDBUT
+				align center center
+				frame lua "IEXOpt_RowFrame(2, rowNumber)"
+			}
+			label
+			{
+				area 0 0 -1 -1
+				enabled "IEXOpt_RowHasValue(2, rowNumber)"
+				text lua "IEXOpt_RowValue(2, rowNumber)"
+				text style "normal"
+				text align left center
+			}
+		}
+		name 'IEXOPT_COL2'
+		area 0 0 0 0
+		rowheight 37
+		table "iexOptCol2"
+		var iexOptRow2
+		scrollbar 'GUISCRC'
+		action "IEXOpt_RowClick(2)"
+		actionAlt "IEXOpt_RowReset(2)"
+	}
+	list
+	{
+		column
+		{
+			width 66
+			label
+			{
+				area 4 0 -1 -1
+				text lua "IEXOpt_RowText(3, rowNumber)"
+				text style "normal"
+				text align left center
+			}
+		}
+		column
+		{
+			width 34
+			label
+			{
+				area 0 0 -1 -1
+				enabled "IEXOpt_RowKind(3, rowNumber) == 'toggle'"
+				bam ROUNDBUT
+				align center center
+				frame lua "IEXOpt_RowFrame(3, rowNumber)"
+			}
+			label
+			{
+				area 0 0 -1 -1
+				enabled "IEXOpt_RowHasValue(3, rowNumber)"
+				text lua "IEXOpt_RowValue(3, rowNumber)"
+				text style "normal"
+				text align left center
+			}
+		}
+		name 'IEXOPT_COL3'
+		area 0 0 0 0
+		rowheight 37
+		table "iexOptCol3"
+		var iexOptRow3
+		scrollbar 'GUISCRC'
+		action "IEXOpt_RowClick(3)"
+		actionAlt "IEXOpt_RowReset(3)"
+	}
+
+	-- description of the option clicked last (right)
+	text
+	{
+		name 'IEXOPT_DESC'
+		area 0 0 0 0
+		text lua "IEXOpt_Description()"
+		text style "normal"
+		scrollbar 'GUISCRC'
+	}
+}
+
+-- a text option: the value typed in a small window
+menu
+{
+	name 'IEX_OPTEDIT'
+	modal
+	label { name 'IEXOPTE_PANEL' area 0 0 0 0 fill 0 0 0 255 }
+	label { name 'IEXOPTE_BOX' area 0 0 0 0 rectangle 1 }
+	label
+	{
+		name 'IEXOPTE_TITLE'
+		area 0 0 0 0
+		text lua "IEXOpt_EditTitle()"
+		text style "normal"
+		text align center center
+	}
+	label { name 'IEXOPTE_FIELDBG' area 0 0 0 0 fill 45 45 45 255 }
+	edit
+	{
+		name 'IEXOPTE_FIELD'
+		area 0 0 0 0
+		var iexOptEditText
+		text style "normal"
+		maxlines 1
+	}
+	button
+	{
+		name 'IEXOPTE_OK'
+		area 0 0 0 0
+		bam GUIOSTCL
+		text "DONE_BUTTON"
+		text style "button"
+		action "IEXOpt_EditDone(true)"
+	}
+	button
+	{
+		name 'IEXOPTE_CANCEL'
+		area 0 0 0 0
+		bam GUIOSTCL
+		text "CANCEL_BUTTON"
+		text style "button"
+		action "IEXOpt_EditDone(false)"
+	}
+}
+
+-- the button IEX adds to the game's Options menu (ESC_MENU), styled like its Return button
+menu
+{
+	name 'IEXOPT_TEMPLATES'
+	ignoreesc
+	template
+	{
+		button
+		{
+			text lua "IEXOpt_EscText()"
+			text style "button"
+			action "IEXOpt_EscClick()"
+			scaleToClip
+		}
+		name 'IEXOPT_TEMPLATE_EscButton'
+	}
+}

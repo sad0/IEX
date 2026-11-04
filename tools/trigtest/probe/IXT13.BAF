@@ -1,0 +1,29 @@
+// Event-trigger object test (tools/trigtest). The first block that is true wins a script pass: the PartySlot1 blocks
+// count events from whoever is PartySlot1, the [ANYONE] blocks the others (they prove the event happened).
+IF
+	Heard(PartySlot1,99)
+THEN
+	RESPONSE #100
+		IncrementGlobal("IXT13H","GLOBAL",1)
+END
+
+IF
+	Heard([ANYONE],99)
+THEN
+	RESPONSE #100
+		IncrementGlobal("IXT13X","GLOBAL",1)
+END
+
+IF
+	AttackedBy(PartySlot1,DEFAULT)
+THEN
+	RESPONSE #100
+		IncrementGlobal("IXT13A","GLOBAL",1)
+END
+
+IF
+	AttackedBy([ANYONE],DEFAULT)
+THEN
+	RESPONSE #100
+		IncrementGlobal("IXT13Y","GLOBAL",1)
+END

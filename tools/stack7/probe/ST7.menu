@@ -1,0 +1,11 @@
+menu
+{
+	name "ST7_TICK"
+	ignoreesc
+	label
+	{
+		name "ST7LABEL"
+		area 0 0 0 0
+		enabled "ST7_Tick()"
+	}
+}

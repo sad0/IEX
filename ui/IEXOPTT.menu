@@ -1,0 +1,44 @@
+-- Empty menus named as EEex's per-tab options menus (EEex_Options_Tab1, 2...): EEex adds them once the game state is
+-- initialized; IEX loads this file at the same time (EEex_OptionsUI.lua, addTabMenus) so that the engine's menu list
+-- (sorted by name) is the same for mods. IEX's options screen does not use them (one empty label each: the engine drops a menu without items).
+
+menu
+{
+	name 'EEex_Options_Tab1'
+	label { area 0 0 0 0 }
+}
+menu
+{
+	name 'EEex_Options_Tab2'
+	label { area 0 0 0 0 }
+}
+menu
+{
+	name 'EEex_Options_Tab3'
+	label { area 0 0 0 0 }
+}
+menu
+{
+	name 'EEex_Options_Tab4'
+	label { area 0 0 0 0 }
+}
+menu
+{
+	name 'EEex_Options_Tab5'
+	label { area 0 0 0 0 }
+}
+menu
+{
+	name 'EEex_Options_Tab6'
+	label { area 0 0 0 0 }
+}
+menu
+{
+	name 'EEex_Options_Tab7'
+	label { area 0 0 0 0 }
+}
+menu
+{
+	name 'EEex_Options_Tab8'
+	label { area 0 0 0 0 }
+}

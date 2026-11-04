@@ -1,0 +1,13 @@
+menu
+{
+	name "T13_TICK"
+	ignoreesc
+
+	-- Its enabled check runs every frame and drives the event-trigger probe (M_T13.lua).
+	label
+	{
+		name "T13LABEL"
+		area 0 0 0 0
+		enabled "T13_Tick()"
+	}
+}

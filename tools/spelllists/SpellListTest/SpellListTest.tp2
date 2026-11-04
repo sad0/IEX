@@ -1,0 +1,48 @@
+// Test data for the IEX native switch spellLists (docs/SPELL_LIST_UNLIMITED.md). Private test copies only.
+//   - 120 wizard level 1 spells ZW1001..ZW1120 ("SLT Wizard 001"..) in IEXSPLST.2DA: the chargen / level-up
+//     wizard list goes past 99 entries at one level.
+//   - 20 priest level 1 spells ZP1001..ZP1020 ("SLT Priest 01"..): every priest gets them (AddNewSpellsPriest).
+//   - SPWI160 ("SLT Slot 60"): only listed while spellSlots99 is on (engine slot 60), to check both switches.
+//   - ZW6001: level 6 Enchantment list spell (specialist bonus check).
+//   - M_SLTEST.lua: writes IEX/slt.txt (switch state, list sizes, chargen mageSpells / priestSpells sizes).
+BACKUP ~weidu_external/backup/SpellListTest~
+AUTHOR ~sad0 (IEX tests)~
+VERSION ~v0.1~
+
+BEGIN ~IEX spell list test data~
+REQUIRE_PREDICATE FILE_EXISTS_IN_GAME ~iexsplst.2da~ ~Install IEX first (it creates IEXSPLST.2DA).~
+
+OUTER_FOR (slt_i = 1; slt_i <= 120; ++slt_i) BEGIN
+  OUTER_SPRINT slt_n ~%slt_i%~
+  ACTION_IF slt_i < 10 BEGIN OUTER_SPRINT slt_n ~00%slt_i%~ END ELSE ACTION_IF slt_i < 100 BEGIN OUTER_SPRINT slt_n ~0%slt_i%~ END
+  COPY_EXISTING ~spwi112.spl~ ~override/ZW1%slt_n%.spl~
+    SAY NAME1 ~SLT Wizard %slt_n%~
+  APPEND ~iexsplst.2da~ ~ZW1%slt_n%  2  1~
+END
+
+OUTER_FOR (slt_i = 1; slt_i <= 20; ++slt_i) BEGIN
+  OUTER_SPRINT slt_n ~%slt_i%~
+  ACTION_IF slt_i < 10 BEGIN OUTER_SPRINT slt_n ~0%slt_i%~ END
+  COPY_EXISTING ~sppr101.spl~ ~override/ZP10%slt_n%.spl~
+    SAY NAME1 ~SLT Priest %slt_n%~
+  APPEND ~iexsplst.2da~ ~ZP10%slt_n%  1  1~
+END
+
+COPY_EXISTING ~spwi112.spl~ ~override/spwi160.spl~
+  SAY NAME1 ~SLT Slot 60~
+
+// ZW6001 ("SLT Enchant 6"): a level 6 Enchantment spell. Vanilla has no Enchantment spell at level 6 in slots
+// 01-50, so an Enchanter gets the level 6 specialist bonus only if MageSchoolSpellsAvailable sees the list.
+COPY_EXISTING ~spwi605.spl~ ~override/ZW6001.spl~
+  SAY NAME1 ~SLT Enchant 6~
+  WRITE_BYTE 0x25 4
+APPEND ~iexsplst.2da~ ~ZW6001  2  6~
+
+// ZW2001..ZW5001 ("SLT Wizard L2".."L5"): one list spell per level 2-5, for sorcerer / bard level-up picks.
+ACTION_FOR_EACH slt_l IN 2 3 4 5 BEGIN
+  COPY_EXISTING ~spwi%slt_l%01.spl~ ~override/ZW%slt_l%001.spl~
+    SAY NAME1 ~SLT Wizard L%slt_l%~
+  APPEND ~iexsplst.2da~ ~ZW%slt_l%001  2  %slt_l%~
+END
+
+COPY ~SpellListTest/M_SLTEST.lua~ ~override~

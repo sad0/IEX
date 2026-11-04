@@ -1,0 +1,13 @@
+menu
+{
+	name "PTH_TICK"
+	ignoreesc
+
+	-- Its enabled check runs every frame and drives the pathfinding test probe (M_IEXPTH.lua).
+	label
+	{
+		name "PTHLABEL"
+		area 0 0 0 0
+		enabled "PTH_Tick()"
+	}
+}

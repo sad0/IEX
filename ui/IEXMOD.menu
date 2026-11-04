@@ -1,0 +1,150 @@
+-- IEX player modules (EEex.ini [X Module] Enable). Lua side: IEX/IEX_Modules.lua. Menu names are the ones EEex
+-- uses (mods test them, e.g. EEex_Menu_IsCursorWithin('B3EffectMenu_Menu', 'B3EffectMenu_Menu_Background')).
+-- List variable names have no '_' (the engine cuts them there).
+
+-- Timer module: bars left of the party portraits (areas set every frame by IEXTimer_Bar).
+menu
+{
+	name 'B3Timer_Menu'
+	ignoreesc
+	label { name 'B3TIMER_M1' area 0 0 0 0 enabled "IEXTimer_Bar(1, 1)" fill 220 30 30 255 }
+	label { name 'B3TIMER_M2' area 0 0 0 0 enabled "IEXTimer_Bar(1, 2)" fill 220 30 30 255 }
+	label { name 'B3TIMER_M3' area 0 0 0 0 enabled "IEXTimer_Bar(1, 3)" fill 220 30 30 255 }
+	label { name 'B3TIMER_M4' area 0 0 0 0 enabled "IEXTimer_Bar(1, 4)" fill 220 30 30 255 }
+	label { name 'B3TIMER_M5' area 0 0 0 0 enabled "IEXTimer_Bar(1, 5)" fill 220 30 30 255 }
+	label { name 'B3TIMER_M6' area 0 0 0 0 enabled "IEXTimer_Bar(1, 6)" fill 220 30 30 255 }
+	label { name 'B3TIMER_C1' area 0 0 0 0 enabled "IEXTimer_Bar(2, 1)" fill 40 210 40 255 }
+	label { name 'B3TIMER_C2' area 0 0 0 0 enabled "IEXTimer_Bar(2, 2)" fill 40 210 40 255 }
+	label { name 'B3TIMER_C3' area 0 0 0 0 enabled "IEXTimer_Bar(2, 3)" fill 40 210 40 255 }
+	label { name 'B3TIMER_C4' area 0 0 0 0 enabled "IEXTimer_Bar(2, 4)" fill 40 210 40 255 }
+	label { name 'B3TIMER_C5' area 0 0 0 0 enabled "IEXTimer_Bar(2, 5)" fill 40 210 40 255 }
+	label { name 'B3TIMER_C6' area 0 0 0 0 enabled "IEXTimer_Bar(2, 6)" fill 40 210 40 255 }
+	label { name 'B3TIMER_S1' area 0 0 0 0 enabled "IEXTimer_Bar(3, 1)" fill 40 210 220 255 }
+	label { name 'B3TIMER_S2' area 0 0 0 0 enabled "IEXTimer_Bar(3, 2)" fill 40 210 220 255 }
+	label { name 'B3TIMER_S3' area 0 0 0 0 enabled "IEXTimer_Bar(3, 3)" fill 40 210 220 255 }
+	label { name 'B3TIMER_S4' area 0 0 0 0 enabled "IEXTimer_Bar(3, 4)" fill 40 210 220 255 }
+	label { name 'B3TIMER_S5' area 0 0 0 0 enabled "IEXTimer_Bar(3, 5)" fill 40 210 220 255 }
+	label { name 'B3TIMER_S6' area 0 0 0 0 enabled "IEXTimer_Bar(3, 6)" fill 40 210 220 255 }
+}
+
+-- Time Step module: a per-frame tick while the world screen is up.
+menu
+{
+	name 'B3TimeStep_Menu'
+	ignoreesc
+	label { area 0 0 0 0 enabled "IEXModules_Tick()" }
+}
+
+-- Effect Menu module: the spells affecting the creature under the cursor (launch key held).
+menu
+{
+	name 'B3EffectMenu_Menu'
+	ignoreesc
+	label
+	{
+		name 'B3EffectMenu_Menu_Border'
+		area 0 0 0 0
+		fill 150 120 80 255
+	}
+	label
+	{
+		name 'B3EffectMenu_Menu_Background'
+		area 0 0 0 0
+		fill 30 22 14 235
+	}
+	list
+	{
+		column
+		{
+			width 22
+			label
+			{
+				area 2 2 40 40
+				bam lua "IEXEffMenu_Icon(rowNumber)"
+				sequence 0
+				frame 0
+				scaleToClip
+			}
+		}
+		column
+		{
+			width 78
+			label
+			{
+				area 4 0 -1 -1
+				text lua "IEXEffMenu_Name(rowNumber)"
+				text style "normal"
+				text align left center
+			}
+		}
+		name 'B3EffectMenu_Menu_List'
+		area 0 0 0 0
+		rowheight 44
+		table "iexEffMenuRows"
+		var iexEffMenuRow
+		scrollbar 'GUISCRC'
+	}
+}
+
+-- Attack Info module: to-hit chances of the selected party members against the creature under the cursor
+-- (or of that creature against them, reverse key held).
+menu
+{
+	name 'B3AttackInfo_Menu'
+	ignoreesc
+	label { name 'B3AttackInfo_Menu_Border' area 0 0 0 0 fill 150 150 150 255 }
+	label { name 'B3AttackInfo_Menu_Background' area 0 0 0 0 fill 0 0 0 230 }
+	label
+	{
+		name 'B3AttackInfo_Menu_Title'
+		area 0 0 0 0
+		text lua "IEXAtk_Title()"
+		text style "normal"
+		text point 14
+		text align left center
+	}
+	list
+	{
+		column
+		{
+			width 46
+			label
+			{
+				area 0 0 -1 -1
+				text lua "IEXAtk_Cell(rowNumber, 1)"
+				text style "normal"
+				text point 14
+				text align right center
+			}
+		}
+		column
+		{
+			width 27
+			label
+			{
+				area 0 0 -1 -1
+				text lua "IEXAtk_Cell(rowNumber, 2)"
+				text style "normal"
+				text point 14
+				text align right center
+			}
+		}
+		column
+		{
+			width 27
+			label
+			{
+				area 0 0 -1 -1
+				text lua "IEXAtk_Cell(rowNumber, 3)"
+				text style "normal"
+				text point 14
+				text align right center
+			}
+		}
+		name 'B3AttackInfo_Menu_List'
+		area 0 0 0 0
+		rowheight 18
+		table "iexAtkRows"
+		var iexAtkRow
+	}
+}
