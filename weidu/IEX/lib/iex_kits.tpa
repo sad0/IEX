@@ -1,0 +1,39 @@
+/*
+ * IEX kit helpers (IEX 0.4.1 and later): single-class kits past KITLIST row 256.
+ *
+ * The engine keeps the CLAB table of single-class kits in a fixed 256-entry array: a single-class kit on KITLIST row
+ * 257 or higher crashes or gets garbage abilities without IEX. IEX (feature "kitLimit", on by default) serves those
+ * rows itself, up to row 16383 (KIT.IDS 0x7FFF). True multiclass kits (KITLIST CLASS 7..18) never used that array.
+ *
+ * WeiDU's own ADD_KIT refuses a 256th kit unless it finds GemRB or ToBEx, and stops at 1280 in any case. With IEX,
+ * add kits past that point with Argent77's ADD_KIT_EX (public domain; a copy ships in IEX/lib/a7#add_kit_ex.tpa),
+ * passing the limit IEX gives:
+ *
+ *   OUTER_SET iex_kit_limit = 0                           // 0: ADD_KIT_EX detects the limit itself (256)
+ *   ACTION_IF FILE_EXISTS ~IEX/lib/iex_kits.tpa~ BEGIN
+ *     INCLUDE ~IEX/lib/iex_kits.tpa~
+ *     LAF iex_kit_limit RET iex_kit_limit = kit_limit END
+ *   END
+ *   INCLUDE ~mymod/lib/a7#add_kit_ex.tpa~                 // or ~IEX/lib/a7#add_kit_ex.tpa~
+ *   LAF ADD_KIT_EX
+ *     INT_VAR kit_class = 2  mixed = RESOLVE_STR_REF(@1)  help = RESOLVE_STR_REF(@2)
+ *             __kits_limit_override = iex_kit_limit
+ *     STR_VAR kit_name = ~MYKIT~  clab_path = ~mymod/kit/myclab.2da~
+ *     RET kit_id
+ *   END
+ *
+ * A mod whose kits land past row 256 needs IEX at play time: REQUIRE_PREDICATE (MOD_IS_INSTALLED ~IEX/IEX.TP2~ ~0~).
+ * Kits already installed with ADD_KIT stay as they are (rows <= 256 never go through IEX).
+ */
+
+// kit_limit: highest KITLIST row a single-class kit may use in this game (16383 with IEX core installed, 256 without).
+// iex: 1 when IEX core is installed. Baldur.lua [IEX] 'Unlimited Kits' = 0 turns the feature off at play time; WeiDU
+// cannot see that setting.
+DEFINE_ACTION_FUNCTION iex_kit_limit
+RET
+  kit_limit
+  iex
+BEGIN
+  OUTER_SET iex = MOD_IS_INSTALLED ~IEX/IEX.TP2~ ~0~
+  OUTER_SET kit_limit = iex ? 16383 : 256
+END

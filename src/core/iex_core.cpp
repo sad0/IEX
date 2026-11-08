@@ -19,6 +19,7 @@
 #include "lua_resources.h"
 #include "opcodes.h"
 #include "settings.h"
+#include "kit_limit.h"
 #include "spell_lists.h"
 #include "spell_slots.h"
 #include "engine_fixes.h"
@@ -164,6 +165,7 @@ void OnEngineLuaReady(lua_State* L)
     OpenLuaIni(L);
     OpenLuaMarshal(L);
     OpenLuaSpellLists(L);
+    OpenLuaKitLimit(L);
     OpenLuaHdTiles(L);
     if (RunFile(L, g_gameDir + "/IEX/IEX_Main.lua", "@IEX_Main.lua"))
         Log("IEX_Main.lua done");

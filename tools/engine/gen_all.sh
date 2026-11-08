@@ -29,6 +29,8 @@ VERIFIED="$VERIFIED --verified $DATA/engine/win/verified_prof.json"
 VERIFIED="$VERIFIED --verified $DATA/engine/win/verified_spelllist.json"
 VERIFIED="$VERIFIED --verified $DATA/engine/win/verified_hd.json"
 VERIFIED="$VERIFIED --verified $DATA/engine/win/verified_fixes.json"
+VERIFIED="$VERIFIED --verified $DATA/engine/win/verified_kitlimit.json"
+VERIFIED="$VERIFIED --verified $DATA/engine/win/verified_fixes2.json"
 # Pathfinding Redux: CGameSprite search paint flags (m_bAddedToSearch-like at painted, "was painted" at repaint),
 # creature category (counter choice), CGameAnimationType::GetPersonalSpace vtable offset, CSearchBitmap private
 # snapshot pointer, CGameArea damage counter (CanSaveGame combat check, next to m_nBattleSongCounter).
@@ -48,6 +50,10 @@ SPLL="--const IEX.spellLists.schoolSite=0x34e445 --const IEX.spellLists.countedP
 # CGameEffectXP vtable ApplyEffect slot. Each site is byte-checked at install.
 FIXW="--const IEX.fix.swingMaxSite=0x3b8975 --const IEX.fix.swingRegs=0x0c0401 --const IEX.fix.checkAddSite=0x1cd011 --const IEX.fix.xpFeedbackSite=0x15fd47 --const IEX.fix.slot.xpApply=0x593cf0"
 FIXL="--const IEX.fix.swingMaxSite=0x44dcd5 --const IEX.fix.swingRegs=0x0e0c0d --const IEX.fix.checkAddSite=0x1ef098 --const IEX.fix.xpFeedbackSite=0x171ec3 --const IEX.fix.slot.xpApply=0xcbfbc0"
+# Engine fixes 2 (IEX 0.4.1): op182 / op183 ApplyEffect slots, AddPartyXP division, op248 flag order, party level sums
+# (Windows: clear / add / use per function; CheckRestEncounter: clear / add + its stack byte's accesses), C2DArray::Load row lines. Windows symbols: verified_fixes2.json.
+FIXW="$FIXW --const IEX.fix.slot.equipItemApply=0x595558 --const IEX.fix.slot.equipTypeApply=0x5955b0 --const IEX.fix.partyXPDivSite=0x26dc87 --const IEX.fix.op248FlagSite=0x1b9f02 --const IEX.fix.levelSum.spawn.0=0x1f0693 --const IEX.fix.levelSum.spawn.1=0x1f092f --const IEX.fix.levelSum.spawn.2=0x1f0a3a --const IEX.fix.levelSum.loadArea.0=0x27ec54 --const IEX.fix.levelSum.loadArea.1=0x27ede1 --const IEX.fix.levelSum.loadArea.2=0x27ee15 --const IEX.fix.levelSum.average.0=0x275870 --const IEX.fix.levelSum.average.1=0x27591c --const IEX.fix.levelSum.average.2=0x27595b --const IEX.fix.levelSum.rest.0=0x17c0f0 --const IEX.fix.levelSum.rest.1=0x17c191 --const IEX.fix.levelSum.restSpill.0=0x17c0f3 --const IEX.fix.levelSum.restSpill.1=0x17c1b0 --const IEX.fix.levelSum.restSpill.2=0x17c4ec --const IEX.fix.levelSum.restSpill.3=0x17d157 --const IEX.fix.c2da.countFirst=0x1156f4 --const IEX.fix.c2da.countSpan=0x11571b --const IEX.fix.c2da.countNext=0x115731 --const IEX.fix.c2da.fillFirst=0x11583b --const IEX.fix.c2da.fillNext=0x115933"
+FIXL="$FIXL --const IEX.fix.slot.equipItemApply=0xcc1fa0 --const IEX.fix.slot.equipTypeApply=0xcc2010 --const IEX.fix.partyXPDivSite=0x3062a0 --const IEX.fix.op248FlagSite=0x1e6a9c --const IEX.fix.levelSum.spawn.0=0x227812 --const IEX.fix.levelSum.loadArea.0=0x2fe3c0 --const IEX.fix.levelSum.average.0=0x2f50a0 --const IEX.fix.levelSum.rest.0=0x180a3d --const IEX.fix.levelSum.rest.1=0x180a7c --const IEX.fix.levelSum.rest.2=0x180dd8 --const IEX.fix.c2da.countFirst=0x50de2d --const IEX.fix.c2da.countSpan=0x50de4b --const IEX.fix.c2da.countNext=0x50de61 --const IEX.fix.c2da.fillFirst=0x50dfdd --const IEX.fix.c2da.fillNext=0x50e0cf"
 python -I tools/engine/build_desc.py "$DATA/engine/types/win64-bg2ee-2.7.3.types.json" engine/win64-bg2ee-2.7.3.iexd \
   --binary "$DATA/win-2.7.3/bg2ee/Baldur.exe" --symbols "$DATA/engine/win64-bg2ee-2.7.3.symbols.json" \
   --hooks engine/hook_targets.txt --methods engine/methods.txt $VERIFIED \

@@ -8,7 +8,7 @@ its own: frame interpolation, HD area tiles, engine fixes, unlimited class spell
 - Bug reports: GitHub issues on this repository or on IEX-releases, or the Sado Mods Discord
   (https://discord.gg/3XzeQv7HeS). Please attach `IEX.log`, `IEX/missing_api.txt` and `WeiDU.log`.
 
-Status: pre-release (0.4.0). Linux has only been tested under WSL2 so far; reports from native Linux desktops are
+Status: pre-release (0.4.1). Linux has only been tested under WSL2 so far; reports from native Linux desktops are
 welcome.
 
 ## Clean room

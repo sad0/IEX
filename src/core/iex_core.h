@@ -7,7 +7,7 @@ struct lua_State;
 
 namespace iex {
 
-constexpr const char* kVersion = "0.4.0";
+constexpr const char* kVersion = "0.4.1";
 
 // Platform layer description of the running game image.
 struct HostInfo {

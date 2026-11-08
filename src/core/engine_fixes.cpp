@@ -14,6 +14,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <string>
+#include <utility>
 #include <vector>
 
 // Sources: the public bug descriptions of the EE Fixpack thread (docs/ENGINE_FIXES.md). Every site below was found
@@ -133,26 +134,114 @@ const char* Cell(Word table, int column, int row)
     return text ? text : "";
 }
 
+// Replaces the vtable slot (description constant `slotConst`) that holds `fn` by `replacement`; false when the slot
+// holds something else (another build, another patch).
+bool PatchSlot(const char* slotConst, Word fn, const void* replacement)
+{
+    const Word rva = Const(slotConst);
+    const Word slot = rva ? EngineImageBase() + rva : 0;
+    if (!fn || !slot || Read<Word>(slot) != fn)
+        return false;
+    const Word value = reinterpret_cast<Word>(replacement);
+    return Patch(slot, &value, sizeof(value));
+}
+
 // --- 1. op182: the found slot index was tested as a boolean (amulet slot 0 = "not equipped", -1 = "equipped") ---
+//
+// The engine's ApplyEffect builds the inner effect from the EFF file before it looks for the item, and frees it only
+// when it applies it: each pass that skips the EFF leaks one effect object. Rare in the engine (amulet slot only),
+// it became the common case once "not equipped" really skips. So the vtable slot gets a wrapper that looks for the
+// item first and skips the whole engine function (no EFF read) when it is not there; when it is, the engine function
+// runs as before, its own FindItemPersonal call redirected so that any found slot counts.
 
 constexpr const char* kEquipItemApply = "_ZN31CGameEffectApplyEffectEquipItem11ApplyEffectEP11CGameSprite";
 constexpr const char* kFindItemPersonal = "_ZN11CGameSprite16FindItemPersonalERK7CStringiii";
-Word g_findItemPersonal = 0;
+constexpr const char* kCopyToString = "_ZNK7CResRef12CopyToStringER7CString";
+using FindItemFn = Word (*)(Word, Word, int, int, int);
+using ApplyFn = Word (*)(Word, Word);
+using CStringDtorFn = void (*)(Word*);
+Word g_findItemPersonal = 0, g_copyToString = 0, g_pchNil = 0;
+CStringDtorFn g_cstringDtor = nullptr;
+ApplyFn g_equipItemApply = nullptr;
+std::uint32_t g_effectsSkipped = 0;  // op182 / op183 passes that skipped the EFF read (IEX_FIX_DEBUG log)
 
 // Returns 1 when the item is found (any slot, amulet included), 0 when not (-1).
 Word FixFindItemPersonal(Word sprite, Word name, int count, int skipInventory, int selectedOnly)
 {
-    const auto r = static_cast<std::int16_t>(reinterpret_cast<Word (*)(Word, Word, int, int, int)>(g_findItemPersonal)(
+    const auto r = static_cast<std::int16_t>(reinterpret_cast<FindItemFn>(g_findItemPersonal)(
         sprite, name, count, skipInventory, selectedOnly));
     return r != -1 ? 1 : 0;
+}
+
+void CountSkipped(const char* what)
+{
+    ++g_effectsSkipped;
+    if (g_debug && (g_effectsSkipped == 1 || g_effectsSkipped % 10000 == 0))
+        Log("equip effect fix: %s skipped without reading its EFF (%u so far)", what, g_effectsSkipped);
+}
+
+// The op182 item test as the engine makes it (effect +0x30 resref as a CString, then FindItemPersonal(name, 0, 1, 1)).
+Word FixEquipItemApply(Word effect, Word sprite)
+{
+    Word name = Read<Word>(g_pchNil);
+    reinterpret_cast<void (*)(Word, Word*)>(g_copyToString)(effect + 0x30, &name);
+    const auto slot = static_cast<std::int16_t>(reinterpret_cast<FindItemFn>(g_findItemPersonal)(
+        sprite, reinterpret_cast<Word>(&name), 0, 1, 1));
+    g_cstringDtor(&name);
+    if (slot == -1) {
+        CountSkipped("op182");
+        return 1;  // what the engine function returns on its skip path
+    }
+    return g_equipItemApply(effect, sprite);
 }
 
 bool InstallOp182()
 {
     const Word fn = Sym(kEquipItemApply);
     g_findItemPersonal = Sym(kFindItemPersonal);
+    g_copyToString = Sym(kCopyToString);
+    g_pchNil = Sym("_afxPchNil");
+    g_cstringDtor = reinterpret_cast<CStringDtorFn>(Sym("_ZN7CStringD1Ev"));
     const Word site = fn && g_findItemPersonal ? FindCall(fn, 0x200, g_findItemPersonal) : 0;
-    return site && HookCallSite(site, g_findItemPersonal, reinterpret_cast<const void*>(&FixFindItemPersonal));
+    const Word slotRva = Const("IEX.fix.slot.equipItemApply");
+    if (!site || !g_copyToString || !g_pchNil || !g_cstringDtor || !slotRva ||
+        Read<Word>(EngineImageBase() + slotRva) != fn)
+        return false;
+    g_equipItemApply = reinterpret_cast<ApplyFn>(fn);
+    return HookCallSite(site, g_findItemPersonal, reinterpret_cast<const void*>(&FixFindItemPersonal)) &&
+           PatchSlot("IEX.fix.slot.equipItemApply", fn, reinterpret_cast<const void*>(&FixEquipItemApply));
+}
+
+// --- op183 (apply EFF if an item of a type is equipped): same EFF-before-test shape as op182, so every pass with no
+//     item of that type equipped leaked one effect object (engine bug). The slot wrapper tests first.
+
+constexpr const char* kEquipTypeApply = "_ZN35CGameEffectApplyEffectEquipItemType11ApplyEffectEP11CGameSprite";
+constexpr const char* kHasItemType = "_ZN11CGameSprite18HasItemTypeEquipedEth";
+Word g_hasItemType = 0;
+ApplyFn g_equipTypeApply = nullptr;
+
+// The op183 test as the engine makes it: HasItemTypeEquiped(param2 as a WORD, 1).
+Word FixEquipTypeApply(Word effect, Word sprite)
+{
+    const auto type = Read<std::uint16_t>(effect + 0x20);
+    const auto has = static_cast<std::uint8_t>(
+        reinterpret_cast<Word (*)(Word, std::uint16_t, std::uint8_t)>(g_hasItemType)(sprite, type, 1));
+    if (!has) {
+        CountSkipped("op183");
+        return 1;
+    }
+    return g_equipTypeApply(effect, sprite);
+}
+
+bool InstallOp183()
+{
+    const Word fn = Sym(kEquipTypeApply);
+    g_hasItemType = Sym(kHasItemType);
+    // the engine function calls HasItemTypeEquiped exactly once (the test the wrapper makes first)
+    if (!fn || !g_hasItemType || !FindCall(fn, 0x200, g_hasItemType))
+        return false;
+    g_equipTypeApply = reinterpret_cast<ApplyFn>(fn);
+    return PatchSlot("IEX.fix.slot.equipTypeApply", fn, reinterpret_cast<const void*>(&FixEquipTypeApply));
 }
 
 // --- 2 + 12. Swing speed factor: WSPECIAL SPEED column, launcher weapon speed instead of the ammo's ---
@@ -511,6 +600,283 @@ bool InstallXPClamp()
     return Patch(slot, &value, sizeof(value));
 }
 
+// --- Byte rewrites at description-constant sites: each site must hold one of the known engine sequences (both
+//     builds) and lie in the function it belongs to; all sites of a fix are checked before any is written.
+
+struct Rewrite {
+    std::uint8_t size;
+    std::uint8_t from[15];
+    std::uint8_t to[15];
+};
+
+struct SiteRewrite {
+    Word site;
+    const Rewrite* rewrite;
+};
+
+// The site of description constant `name`, if it is in [fn, fn + range) and holds one of `rewrites`.
+bool FindRewrite(const char* name, Word fn, std::size_t range, const Rewrite* rewrites, std::size_t count,
+                 SiteRewrite& out)
+{
+    const Word rva = Const(name);
+    const Word site = rva ? EngineImageBase() + rva : 0;
+    if (!fn || !site || site < fn || site >= fn + range)
+        return false;
+    for (std::size_t i = 0; i < count; ++i) {
+        if (Matches(site, rewrites[i].from, rewrites[i].size)) {
+            out = {site, &rewrites[i]};
+            return true;
+        }
+    }
+    return false;
+}
+
+bool ApplyRewrites(const std::vector<SiteRewrite>& sites)
+{
+    for (const SiteRewrite& s : sites)
+        if (!Patch(s.site, s.rewrite->to, s.rewrite->size))
+            return false;
+    return true;
+}
+
+// --- AddPartyXP: the share per living member was an unsigned division, so a negative amount (AddExperienceParty(-N),
+//     a negative XPLIST "P_" value...) gave every member about 4294967296 / n XP instead of a loss. Signed division:
+//     `xor edx, edx; div ecx` becomes `cdq; idiv ecx` (positive amounts give the same share and remainder).
+
+const Rewrite kPartyXPDiv[] = {
+    {6, {0x89, 0xD8, 0x31, 0xD2, 0xF7, 0xF1}, {0x89, 0xD8, 0x99, 0xF7, 0xF9, 0x90}},  // Linux: mov eax, ebx first
+    {6, {0x33, 0xD2, 0x8B, 0xC3, 0xF7, 0xF1}, {0x8B, 0xC3, 0x99, 0xF7, 0xF9, 0x90}},  // Windows: xor edx, edx first
+};
+
+bool InstallPartyXP()
+{
+    SiteRewrite s;
+    if (!FindRewrite("IEX.fix.partyXPDivSite", Sym("_ZN8CInfGame10AddPartyXPEj"), 0x200, kPartyXPDiv, 2, s))
+        return false;
+    return ApplyRewrites({s});
+}
+
+// --- op248 (melee hit effect): the flag of param2 bit 2 was set on the loaded effect before the null test, so a
+//     missing EFF with that bit wrote to address 0x48 (crash on every hit). The null test now comes first.
+
+const Rewrite kOp248Order[] = {
+    // Linux (effect in rsi and rax, this in rbp):
+    //   test byte [rbp+0x20], 4; je +4; or dword [rax+0x48], 4; test rsi, rsi; je skip
+    //   -> test rsi, rsi; je skip; test byte [rbp+0x20], 4; je +4; or dword [rsi+0x48], 4
+    {15, {0xF6, 0x45, 0x20, 0x04, 0x74, 0x04, 0x83, 0x48, 0x48, 0x04, 0x48, 0x85, 0xF6, 0x74, 0x0C},
+         {0x48, 0x85, 0xF6, 0x74, 0x16, 0xF6, 0x45, 0x20, 0x04, 0x74, 0x04, 0x83, 0x4E, 0x48, 0x04}},
+    // Windows (effect in rbx, this in rdi), same reordering
+    {15, {0xF6, 0x47, 0x20, 0x04, 0x74, 0x04, 0x83, 0x4B, 0x48, 0x04, 0x48, 0x85, 0xDB, 0x74, 0x0F},
+         {0x48, 0x85, 0xDB, 0x74, 0x19, 0xF6, 0x47, 0x20, 0x04, 0x74, 0x04, 0x83, 0x4B, 0x48, 0x04}},
+};
+
+bool InstallOp248()
+{
+    SiteRewrite s;
+    if (!FindRewrite("IEX.fix.op248FlagSite", Sym("_ZN22CGameEffectMeleeEffect11ApplyEffectEP11CGameSprite"), 0x100,
+                     kOp248Order, 2, s))
+        return false;
+    return ApplyRewrites({s});
+}
+
+// --- Party level sums kept in a byte (wrapped at 256): ARE spawn points (CGameSpawning::DoAIUpdate -> Spawn), the
+//     NPC level chart of CInfGame::LoadArea, CInfGame::GetAveragePartyLevel (AddXP2DA / XPLIST) and the rest
+//     encounter strength of CGameArea::CheckRestEncounter. The sum is kept in the full register: Linux only
+//     truncated it before the use (movzx), Windows also added and cleared it as a byte (xor r8b / add r8b, al /
+//     movzx). GetAverageLevel returns a clean small value in eax on both builds.
+//     CheckRestEncounter keeps the sum in a stack byte across the spawn-square search. Linux: the byte's slot is a
+//     free dword (the compiler reuses it as a dword later), so the clear, add and read become dword ones. Windows:
+//     the three bytes after it are live (other locals), so the byte's stores and reads become calls to tiny stubs
+//     near the image that keep the full sum in a dword of their own (the function is not reentrant).
+
+const Rewrite kLevelSum[] = {
+    {3, {0x0F, 0xB6, 0xC3}, {0x89, 0xD8, 0x90}},                    // movzx eax, bl -> mov eax, ebx
+    {4, {0x41, 0x0F, 0xB6, 0xD4}, {0x44, 0x89, 0xE2, 0x90}},        // movzx edx, r12b -> mov edx, r12d
+    {4, {0x41, 0x0F, 0xB6, 0xC4}, {0x44, 0x89, 0xE0, 0x90}},        // movzx eax, r12b -> mov eax, r12d
+    {3, {0x45, 0x32, 0xFF}, {0x45, 0x31, 0xFF}},                    // xor r15b, r15b -> xor r15d, r15d
+    {3, {0x45, 0x32, 0xF6}, {0x45, 0x31, 0xF6}},                    // xor r14b, r14b -> xor r14d, r14d
+    {3, {0x44, 0x02, 0xF8}, {0x44, 0x03, 0xF8}},                    // add r15b, al -> add r15d, eax
+    {3, {0x44, 0x02, 0xF0}, {0x44, 0x03, 0xF0}},                    // add r14b, al -> add r14d, eax
+    {4, {0x45, 0x0F, 0xB6, 0xC7}, {0x45, 0x89, 0xF8, 0x90}},        // movzx r8d, r15b -> mov r8d, r15d
+    {4, {0x41, 0x0F, 0xB6, 0xC6}, {0x44, 0x89, 0xF0, 0x90}},        // movzx eax, r14b -> mov eax, r14d
+    {4, {0x41, 0x0F, 0xB6, 0xC7}, {0x44, 0x89, 0xF8, 0x90}},        // movzx eax, r15b -> mov eax, r15d
+    // Linux CheckRestEncounter, stack slot [rbp-0xd8]
+    {7, {0xC6, 0x85, 0x28, 0xFF, 0xFF, 0xFF, 0x00}, {0x83, 0xA5, 0x28, 0xFF, 0xFF, 0xFF, 0x00}},  // mov byte 0 -> and dword 0
+    {6, {0x00, 0x85, 0x28, 0xFF, 0xFF, 0xFF}, {0x01, 0x85, 0x28, 0xFF, 0xFF, 0xFF}},              // add byte, al -> dword, eax
+    {7, {0x0F, 0xB6, 0x8D, 0x28, 0xFF, 0xFF, 0xFF}, {0x8B, 0x8D, 0x28, 0xFF, 0xFF, 0xFF, 0x90}},  // movzx ecx, byte -> mov ecx
+};
+
+// Windows CheckRestEncounter: the 5-byte accesses to the stack byte [rsp+0x63] and the stub instruction (rip-relative
+// to the stub block's dword) that replaces each one. A `call` to the stub pushes below rsp (no red zone on win64).
+struct SpillAccess {
+    std::uint8_t from[5];
+    std::uint8_t op[3];  // opcode bytes before the rip-relative disp32
+    std::uint8_t opSize;
+};
+
+const SpillAccess kRestSpill[] = {
+    {{0x44, 0x88, 0x74, 0x24, 0x63}, {0x44, 0x89, 0x35}, 3},  // mov byte [rsp+0x63], r14b -> mov [sum], r14d
+    {{0x0F, 0xB6, 0x44, 0x24, 0x63}, {0x8B, 0x05, 0x00}, 2},  // movzx eax, byte [rsp+0x63] -> mov eax, [sum]
+    {{0x0F, 0xB6, 0x4C, 0x24, 0x63}, {0x8B, 0x0D, 0x00}, 2},  // movzx ecx, byte [rsp+0x63] -> mov ecx, [sum]
+};
+
+// IEX.fix.levelSum.restSpill.<n> (Windows only): checks every site, then writes the stubs (one per access kind, 8
+// bytes each, then the dword) and the calls. Returns the calls to write; false when a site does not match.
+bool PrepareRestSpill(Word fn, std::size_t range, std::vector<std::pair<Word, std::int32_t>>& calls)
+{
+    constexpr std::size_t kKinds = sizeof(kRestSpill) / sizeof(kRestSpill[0]);
+    Word sites[8] = {};
+    std::size_t kinds[8] = {};
+    std::size_t count = 0;
+    for (; count < 8; ++count) {
+        const std::string name = "IEX.fix.levelSum.restSpill." + std::to_string(count);
+        const Word rva = Const(name.c_str());
+        if (!rva)
+            break;
+        const Word site = EngineImageBase() + rva;
+        if (!fn || site < fn || site >= fn + range)
+            return false;
+        std::size_t k = 0;
+        while (k < kKinds && !Matches(site, kRestSpill[k].from, 5))
+            ++k;
+        if (k == kKinds)
+            return false;
+        sites[count] = site;
+        kinds[count] = k;
+    }
+    if (!count)
+        return true;  // Linux: the slot is widened in place
+    auto* block = static_cast<std::uint8_t*>(platform::AllocExecNear(fn, kKinds * 8 + 4));
+    if (!block)
+        return false;
+    std::memset(block, 0xCC, kKinds * 8 + 4);
+    std::uint8_t* sum = block + kKinds * 8;
+    std::memset(sum, 0, 4);
+    for (std::size_t k = 0; k < kKinds; ++k) {
+        std::uint8_t* stub = block + k * 8;
+        const std::size_t n = kRestSpill[k].opSize;
+        std::memcpy(stub, kRestSpill[k].op, n);
+        const auto disp = static_cast<std::int32_t>(sum - (stub + n + 4));
+        std::memcpy(stub + n, &disp, 4);
+        stub[n + 4] = 0xC3;  // ret
+    }
+    for (std::size_t i = 0; i < count; ++i) {
+        const std::int64_t rel = reinterpret_cast<std::int64_t>(block + kinds[i] * 8) -
+                                 static_cast<std::int64_t>(sites[i] + 5);
+        if (rel < INT32_MIN || rel > INT32_MAX)
+            return false;
+        calls.emplace_back(sites[i], static_cast<std::int32_t>(rel));
+    }
+    return true;
+}
+
+bool InstallPartyLevelSum()
+{
+    // IEX.fix.levelSum.<function>.<n>: Linux 1 site per function, Windows 3 (clear, add, use); rest encounters:
+    // Linux 3 (clear, add, read of the stack slot), Windows 2 (clear, add) and the stack byte's accesses (restSpill)
+    struct Place {
+        const char* prefix;
+        const char* function;
+        std::size_t range;
+    };
+    const Place places[] = {
+        {"IEX.fix.levelSum.spawn.", "_ZN13CGameSpawning10DoAIUpdateEhi", 0x800},
+        {"IEX.fix.levelSum.loadArea.", "_ZN8CInfGame8LoadAreaE7CStringhhh", 0x2000},
+        {"IEX.fix.levelSum.average.", "_ZN8CInfGame20GetAveragePartyLevelEv", 0x200},
+        {"IEX.fix.levelSum.rest.", "_ZN9CGameArea18CheckRestEncounterERi", 0x1000},
+    };
+    std::vector<SiteRewrite> sites;
+    for (const Place& p : places) {
+        const Word fn = Sym(p.function);
+        int found = 0;
+        for (int n = 0; n < 3; ++n) {
+            const std::string name = p.prefix + std::to_string(n);
+            if (!Const(name.c_str()))
+                break;
+            SiteRewrite s;
+            if (!FindRewrite(name.c_str(), fn, p.range, kLevelSum, sizeof(kLevelSum) / sizeof(kLevelSum[0]), s))
+                return false;
+            sites.push_back(s);
+            ++found;
+        }
+        if (!found)
+            return false;
+    }
+    std::vector<std::pair<Word, std::int32_t>> calls;
+    if (!PrepareRestSpill(Sym("_ZN9CGameArea18CheckRestEncounterERi"), 0x1400, calls))
+        return false;
+    if (!ApplyRewrites(sites))
+        return false;
+    for (const auto& c : calls) {
+        std::uint8_t call[5] = {0xE8};
+        std::memcpy(call + 1, &c.second, 4);
+        if (!Patch(c.first, call, sizeof(call)))
+            return false;
+    }
+    return true;
+}
+
+// --- C2DArray::Load: the row count skipped lines that start with a space, the fill pass did not (and had no bound):
+//     an indented row, or a line of spaces between rows, wrote one row past the arrays per such line (heap
+//     corruption, crash). Both passes now see the same lines: lines of spaces only are skipped by both (they never
+//     held data), indented lines are rows in both (the fill already read them as rows). Valid files load as before.
+
+using StrtokFn = char* (*)(char*, const char*);
+using StrcspnFn = std::size_t (*)(const char*, const char*);
+StrtokFn g_strtok = nullptr;
+StrcspnFn g_strcspn = nullptr;
+
+bool OnlySpaces(const char* line)
+{
+    return line[std::strspn(line, " ")] == '\0';
+}
+
+// The rows' strtok(..., "\n\r") calls (count and fill pass): the next line that holds more than spaces.
+char* FixNextLine(char* text, const char* delimiters)
+{
+    char* line = g_strtok(text, delimiters);
+    while (line && OnlySpaces(line))
+        line = g_strtok(nullptr, delimiters);
+    return line;
+}
+
+// The count pass's strcspn(line, " ") (0 = not a row): every line it sees now holds data, indented or not.
+std::size_t FixRowStart(const char* line, const char* reject)
+{
+    const std::size_t n = g_strcspn(line, reject);
+    return n ? n : 1;
+}
+
+bool InstallTwoDARows()
+{
+    const Word fn = Sym("_ZN8C2DArray4LoadERK7CResRef");
+    const char* lines[] = {"IEX.fix.c2da.countFirst", "IEX.fix.c2da.countNext", "IEX.fix.c2da.fillFirst",
+                           "IEX.fix.c2da.fillNext"};
+    Word sites[4] = {};
+    Word strtok = 0;
+    for (int i = 0; i < 4; ++i) {
+        const Word rva = Const(lines[i]);
+        sites[i] = rva ? EngineImageBase() + rva : 0;
+        if (!fn || !sites[i] || sites[i] < fn || sites[i] >= fn + 0x1000)
+            return false;
+        const Word target = CallTarget(sites[i]);
+        if (!target || (strtok && target != strtok))
+            return false;  // all four call the same function (strtok)
+        strtok = target;
+    }
+    const Word spanRva = Const("IEX.fix.c2da.countSpan");
+    const Word span = spanRva ? EngineImageBase() + spanRva : 0;
+    const Word strcspn = span > sites[0] && span < sites[1] ? CallTarget(span) : 0;
+    if (!strcspn || strcspn == strtok)
+        return false;
+    g_strtok = reinterpret_cast<StrtokFn>(strtok);
+    g_strcspn = reinterpret_cast<StrcspnFn>(strcspn);
+    for (Word site : sites)
+        if (!HookCallSite(site, strtok, reinterpret_cast<const void*>(&FixNextLine)))
+            return false;
+    return HookCallSite(span, strcspn, reinterpret_cast<const void*>(&FixRowStart));
+}
+
 struct FixDesc {
     const char* name;
     bool (*install)();
@@ -528,6 +894,12 @@ const FixDesc kFixes[] = {
     {"negativeXPFeedback", &InstallXPFeedBack},
     {"xpFloor", &InstallXPClamp},
     {"eventTriggerObjects", &InstallEventTriggerObjects},  // beyond EEex: current EEex keeps the engine bug
+    // IEX 0.4.1: engine bugs found by IEX's own analysis (not in the EE Fixpack thread)
+    {"op183EffectLeak", &InstallOp183},
+    {"partyXPSigned", &InstallPartyXP},
+    {"op248MissingEff", &InstallOp248},
+    {"partyLevelSum", &InstallPartyLevelSum},
+    {"twoDARows", &InstallTwoDARows},
 };
 
 } // namespace

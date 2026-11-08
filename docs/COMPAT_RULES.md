@@ -18,6 +18,21 @@ Rule numbers are stable (a new rule gets the next number); rules apply in this o
 | 8 | `FILE_EXISTS\s+([~"])(?:lua51\|LuaProvider)\.dll\1` | `(<match> OR FILE_EXISTS ~IEX/IEX_Main.lua~)` | EEex's LuaJIT mode DLLs (BuffBot). IEX gives the same Lua libraries when InfinityLoader.ini says `LuaPatchMode=REPLACE_INTERNAL_WITH_EXTERNAL` (IEX.tp2 component 2); the mods still read that line themselves |
 | 9 | `FILE_EXISTS\s+([~"])EEex\.dll\1` | `(<match> OR FILE_EXISTS ~IEX/IEX_Main.lua~)` | EEex's loader library in the game folder (BG Pathfinding Redux "Install EEex first"). IEX is the loader; that mod's runtime itself is replaced by IEX's native Pathfinding Redux |
 
+## EEex alias (no mod edit needed)
+
+IEX core also installs `EEex/EEex.tp2` (source: `weidu/IEX/alias/EEex.tp2`), a component with no EEex code, labelled
+`B3-EEex-Main`, logged as `~EEEX/EEEX.TP2~ #0 #0 // IEX compatibility alias`. It adds comment-only probe files to
+`override` (`M___EEex.lua`, `M__EEex.lua`, one per `EEex_*.lua` IEX ships). IEX never loads them.
+
+- So rules 0-6 hold on unmodified mods. `patch_mod.py` is still needed for rules 7-9 (function lookups in EEex's Lua
+  sources, `lua51.dll`, `EEex.dll`), and it stays valid: it only adds `OR` branches.
+- A core install runs a second WeiDU at exit (`AT_EXIT`, `AT_NOW`: such a command must not end in `.tp2`, WeiDU swallows
+  it). The tp2 is copied by shell so it survives an IEX uninstall, when WeiDU replays the log; the alias then refuses
+  itself, and `EEex/EEex.tp2` stays on disk.
+- Component 3 of `IEX.tp2` adds the alias to a game whose core is older.
+- A real EEex is told apart by the text `IEX compatibility alias` in the tp2: an EEex folder is never overwritten (IEX
+  warns and skips the alias), an installed EEex still blocks IEX.
+
 ## Checks deliberately not rewritten
 
 They test EEex native code that IEX does not load; the mods' own fallback (or refusal) is the right result.

@@ -1,0 +1,13 @@
+menu
+{
+	name "FX2_TICK"
+	ignoreesc
+
+	-- Its enabled check runs every frame and drives the engine-fix probe 2 (M_FX2.lua).
+	label
+	{
+		name "FX2LABEL"
+		area 0 0 0 0
+		enabled "FX2_Tick()"
+	}
+}

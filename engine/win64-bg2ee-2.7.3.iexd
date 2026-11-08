@@ -4056,3 +4056,46 @@ const IEX.fix.xpFeedbackSite 0x15fd47
 const IEX.fix.slot.xpApply 0x593cf0
 symbol _ZN12CAICondition12TriggerHoldsEP10CAITriggerR13CTypedPtrListI8CPtrListS1_EP11CGameAIBase 0x116870
 symbol _ZN10CAITrigger6OfTypeERKS_ 0x130730
+# kitLimit (src/core/kit_limit.cpp, docs/KIT_LIMIT.md; Windows: IEX-data/engine/win/verified_kitlimit.json): the only
+# two calls of CRuleTables::GetClassAbilityTable (AddClassAbilities, RemoveClassAbilities), 2026-11-04.
+symbol _ZNK11CRuleTables20GetClassAbilityTableEhj 0x23cc60
+symbol _afxPchNil 0x65cb10
+callsite 0x347d7c _ZNK11CRuleTables20GetClassAbilityTableEhj
+callsite 0x3691c4 _ZNK11CRuleTables20GetClassAbilityTableEhj
+# engine fixes 2 (IEX 0.4.1; src/core/engine_fixes.cpp, docs/ENGINE_FIXES.md; Windows: IEX-data/engine/win/
+# verified_fixes2.json), 2026-11-07. Party level sums: 3 sites per function (byte clear, byte add, use).
+symbol _ZN35CGameEffectApplyEffectEquipItemType11ApplyEffectEP11CGameSprite 0x1a7080
+symbol _ZN11CGameSprite18HasItemTypeEquipedEth 0x35ec60
+symbol _ZNK7CResRef12CopyToStringER7CString 0x3ffe40
+symbol _ZN8CInfGame10AddPartyXPEj 0x26db60
+symbol _ZN22CGameEffectMeleeEffect11ApplyEffectEP11CGameSprite 0x1b9e80
+symbol _ZN13CGameSpawning10DoAIUpdateEhi 0x1f0680
+symbol _ZN8CInfGame8LoadAreaE7CStringhhh 0x27ebd0
+symbol _ZN8CInfGame20GetAveragePartyLevelEv 0x275860
+const IEX.fix.slot.equipItemApply 0x595558
+const IEX.fix.slot.equipTypeApply 0x5955b0
+const IEX.fix.partyXPDivSite 0x26dc87
+const IEX.fix.op248FlagSite 0x1b9f02
+const IEX.fix.levelSum.spawn.0 0x1f0693
+const IEX.fix.levelSum.spawn.1 0x1f092f
+const IEX.fix.levelSum.spawn.2 0x1f0a3a
+const IEX.fix.levelSum.loadArea.0 0x27ec54
+const IEX.fix.levelSum.loadArea.1 0x27ede1
+const IEX.fix.levelSum.loadArea.2 0x27ee15
+const IEX.fix.levelSum.average.0 0x275870
+const IEX.fix.levelSum.average.1 0x27591c
+const IEX.fix.levelSum.average.2 0x27595b
+const IEX.fix.c2da.countFirst 0x1156f4
+const IEX.fix.c2da.countSpan 0x11571b
+const IEX.fix.c2da.countNext 0x115731
+const IEX.fix.c2da.fillFirst 0x11583b
+const IEX.fix.c2da.fillNext 0x115933
+# CGameArea::CheckRestEncounter party level sum (IEX 0.4.1, partyLevelSum; verified_fixes2.json), 2026-11-07:
+# clear / add of r14, then the 4 accesses to its stack byte [rsp+0x63] (2 stores, 2 reads) redirected to stubs.
+symbol _ZN9CGameArea18CheckRestEncounterERi 0x17bf60
+const IEX.fix.levelSum.rest.0 0x17c0f0
+const IEX.fix.levelSum.rest.1 0x17c191
+const IEX.fix.levelSum.restSpill.0 0x17c0f3
+const IEX.fix.levelSum.restSpill.1 0x17c1b0
+const IEX.fix.levelSum.restSpill.2 0x17c4ec
+const IEX.fix.levelSum.restSpill.3 0x17d157

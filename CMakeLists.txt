@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(IEX VERSION 0.4.0 LANGUAGES CXX)
+project(IEX VERSION 0.4.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -24,6 +24,7 @@ set(IEX_CORE_SOURCES
     src/core/framerate.cpp
     src/core/spell_slots.cpp
     src/core/spell_lists.cpp
+    src/core/kit_limit.cpp
     src/core/hd_tiles.cpp
     src/core/hd_mips.cpp
     src/core/engine_fix_triggers.cpp

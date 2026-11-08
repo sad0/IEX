@@ -25,7 +25,8 @@
 --     spellSlots99 (class spell lists read SPWI/SPPR slots 01-99; the SpellSlots mod enables it),
 --     spellLists (class spell lists continue with the IEX lists; lua/IEX_SpellLists.lua enables it),
 --     hdTiles (HD area tiles: TIS tile size 128/256/512; lua/IEX_HdTiles.lua enables it)
---   features (installed at startup, reported only): partyVision, alliedPassThrough, emptyContainerOutline
+--   features (installed at startup, reported only): partyVision, alliedPassThrough, emptyContainerOutline,
+--     kitLimit (single-class kits on KITLIST rows 257-16383; IEX_KitLimit(), Baldur.lua [IEX] 'Unlimited Kits')
 --
 -- EEex_Hook* requests of mods written for EEex's asm API reach these points through lua/IEX_HookRequests.lua.
 --

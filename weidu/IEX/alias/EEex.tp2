@@ -1,0 +1,27 @@
+// IEX compatibility alias: this is not EEex.
+// Many mods look for EEex in their installers (MOD_IS_INSTALLED ~EEex.tp2~, ID_OF_LABEL B3-EEex-Main,
+// FILE_EXISTS_IN_GAME ~EEex_Actionbar.lua~...). IEX answers the same API, so it installs this empty component: those
+// mods then take their EEex path with no change to their files. It contains no EEex code. IEX.tp2 copies this file to
+// EEex/EEex.tp2 and installs it. Report problems to IEX (https://github.com/sad0/IEX-releases), not to EEex.
+BACKUP ~weidu_external/backup/EEex-alias~
+AUTHOR ~sad0 (IEX, https://github.com/sad0/IEX-releases)~
+VERSION ~IEX~
+
+BEGIN ~IEX compatibility alias (not EEex: IEX answers mods that look for EEex)~
+DESIGNATED 0
+LABEL ~B3-EEex-Main~
+REQUIRE_PREDICATE (MOD_IS_INSTALLED ~IEX/IEX.TP2~ ~0~) ~This alias needs IEX.~
+
+// The files mods probe to detect EEex. IEX loads its own runtime from the IEX folder: these are only found, not used.
+ACTION_FOR_EACH iex_probe IN
+    M___EEex M__EEex EEex_Actionbar EEex_Extras EEex_Keybinds EEex_Legacy EEex_Listeners EEex_Marshal EEex_Menu
+    EEex_MenuUI EEex_Objects EEex_Opcode EEex_Options EEex_OptionsUI EEex_Resource EEex_Spells EEex_Sprite EEex_TA
+    EEex_Utility
+BEGIN
+  ACTION_IF NOT FILE_EXISTS_IN_GAME ~%iex_probe%.lua~ BEGIN
+    <<<<<<<< .../iex-inlined/eeex-probe.lua
+-- IEX compatibility alias: not EEex. Lets mod installers that look for this file find it; IEX does not use it.
+>>>>>>>>
+    COPY ~.../iex-inlined/eeex-probe.lua~ ~override/%iex_probe%.lua~
+  END
+END

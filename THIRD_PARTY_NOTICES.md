@@ -1,7 +1,11 @@
 # Third-party notices
 
-IEX bundles no third-party source code or libraries. It runs inside the game process and uses the game's own
+IEX bundles no third-party libraries, and one third-party WeiDU file (below). It runs inside the game process and uses the game's own
 statically linked Lua.
+
+Bundled:
+
+- **ADD_KIT_EX** by Argent77, public domain: `weidu/IEX/lib/a7#add_kit_ex.tpa`, unchanged, for kit mods.
 
 Behaviour reproduced from other projects:
 

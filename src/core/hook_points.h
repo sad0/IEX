@@ -44,7 +44,7 @@ enum Point : int {
     // rendering (hd_tiles.cpp)
     kHdTiles,
     // engine features (whole behaviours installed at startup)
-    kPartyVision, kAlliedPassThrough, kEmptyContainerOutline,
+    kPartyVision, kAlliedPassThrough, kEmptyContainerOutline, kKitLimit,
     kCount
 };
 

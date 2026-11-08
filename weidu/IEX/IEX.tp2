@@ -4,7 +4,7 @@
 // so mods can test `MOD_IS_INSTALLED ~IEX/IEX.TP2~ ~0~`.
 BACKUP ~weidu_external/backup/IEX~
 AUTHOR ~sad0 (https://github.com/sad0/IEX-releases)~
-VERSION ~v0.4.0~
+VERSION ~v0.4.1~
 
 ALWAYS
   // Data tables and script names every EEex-dependent mod expects. Idempotent: existing files and IDS entries
@@ -102,6 +102,26 @@ LogFile=
       COPY ~.../iex-inlined/InfinityLoader.ini~ ~InfinityLoader.ini~
     END
   END
+  // Mods that look for EEex in their installers find this alias (alias/EEex.tp2, its own WeiDU.log line, written once
+  // this WeiDU run has saved the log). Never replaces a real EEex folder. The tp2 is copied with a plain shell command:
+  // WeiDU must still find it when it replays the log after uninstalling IEX (the alias then refuses itself).
+  DEFINE_ACTION_FUNCTION ~IEX_INSTALL_EEEX_ALIAS~ BEGIN
+    ACTION_IF FILE_EXISTS ~EEex/EEex.tp2~ AND NOT FILE_CONTAINS ~EEex/EEex.tp2~ ~IEX compatibility alias~ BEGIN
+      WARN ~An EEex folder is present: the IEX alias is not installed. Remove that folder, then install IEX component 3.~
+    END ELSE BEGIN
+      ACTION_IF (~%WEIDU_OS%~ STRING_EQUAL_CASE ~win32~) BEGIN
+        AT_NOW ~mkdir EEex 2>nul & type IEX\alias\EEex.tp2 >EEex\EEex.tp2 2>nul~
+      END ELSE BEGIN
+        AT_NOW ~mkdir -p EEex; cp IEX/alias/EEex.tp2 EEex/EEex.tp2 >/dev/null~
+      END
+      // Already in the log (core reinstall): WeiDU replays it, and a second install would replay every later mod.
+      ACTION_IF NOT (MOD_IS_INSTALLED ~EEEX/EEEX.TP2~ ~0~ OR (FILE_EXISTS ~WeiDU.log~ AND FILE_CONTAINS ~WeiDU.log~ "^~EEEX.EEEX\.TP2~")) BEGIN
+        // Not ending in .tp2 (here and in AT_NOW above): WeiDU would swallow the command.
+        AT_EXIT ~"%WEIDU_EXECUTABLE%" --no-exit-pause --noautoupdate --language 0 --skip-at-view --force-install 0 EEex/EEex.tp2 --log EEex/alias.debug~
+      END
+    END
+  END
+
   // The EEex options screen (IEX's own menu file).
   DEFINE_ACTION_FUNCTION ~IEX_INSTALL_UI~ BEGIN
     COPY ~IEX/ui~ ~override~
@@ -112,7 +132,8 @@ BEGIN ~IEX core (EEex-compatible engine extender)~
 DESIGNATED 0
 LABEL ~IEX-Core~
 REQUIRE_PREDICATE (GAME_IS ~bg2ee eet~) ~IEX supports BG2EE and EET 2.7.3 only.~
-REQUIRE_PREDICATE (NOT MOD_IS_INSTALLED ~EEEX/EEEX.TP2~ ~0~) ~Uninstall EEex first: IEX replaces it.~
+// Real EEex only: IEX's own alias (component 3) answers the same check.
+REQUIRE_PREDICATE (NOT MOD_IS_INSTALLED ~EEEX/EEEX.TP2~ ~0~ OR FILE_CONTAINS ~EEex/EEex.tp2~ ~IEX compatibility alias~) ~Uninstall EEex first: IEX replaces it.~
 
 ACTION_IF (FILE_EXISTS ~Baldur.exe~ OR FILE_EXISTS ~BaldurII.exe~ OR FILE_EXISTS ~SiegeOfDragonspear.exe~) BEGIN
   // Windows: start the game with IEXLauncher.exe.
@@ -128,6 +149,7 @@ END
 LAF ~IEX_INSTALL_EEEX_DATA~ END
 LAF ~IEX_INSTALL_LOADER_INI~ END
 LAF ~IEX_INSTALL_UI~ END
+LAF ~IEX_INSTALL_EEEX_ALIAS~ END
 
 // For games where IEX core was installed before these tables existed: adds them without reinstalling core
 // (a core reinstall would uninstall and reinstall every mod installed after it).
@@ -150,3 +172,11 @@ COPY ~InfinityLoader.ini~ ~InfinityLoader.ini~
   REPLACE_TEXTUALLY ~^LuaPatchMode=[^%WNL%%MNL%%LNL%]*~ ~LuaPatchMode=REPLACE_INTERNAL_WITH_EXTERNAL~
   REPLACE_TEXTUALLY ~^LuaLibrary=[^%WNL%%MNL%%LNL%]*~ ~LuaLibrary=lua51.dll~
   REPLACE_TEXTUALLY ~^LuaVersionExternal=[^%WNL%%MNL%%LNL%]*~ ~LuaVersionExternal=5.1~
+
+// Mods that look for EEex at install then work unchanged. Core installs this itself; this component is for games
+// where IEX core was installed before the alias existed (a core reinstall would reinstall every later mod).
+BEGIN ~EEex alias for mod installers (update of an older IEX core install)~
+DESIGNATED 3
+LABEL ~IEX-EEexAlias~
+REQUIRE_PREDICATE (MOD_IS_INSTALLED ~IEX/IEX.TP2~ ~0~) ~Install IEX core first.~
+LAF ~IEX_INSTALL_EEEX_ALIAS~ END

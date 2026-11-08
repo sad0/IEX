@@ -689,7 +689,7 @@ local function registerOwn()
 		S.IEX_OPTIONS_TAB_FIXES = 'Engine Fixes'
 		local fixes = {
 			{ nil, 'Engine Fixes', 'All engine fixes. Off: the game runs with the engine\'s own bugs, as without IEX.' },
-			{ 'op182EquippedItem', 'Equipped Item Effects (op182)', 'Apply EFF if item equipped only applies when the item is really equipped.' },
+			{ 'op182EquippedItem', 'Equipped Item Effects (op182)', 'Apply EFF if item equipped only applies when the item is really equipped (and no longer leaks memory).' },
 			{ 'weaponSpeed', 'Weapon Speed', 'WSPECIAL.2DA SPEED column applied (High / Grand Mastery speed bonus); ranged attacks use the launcher\'s speed, not the ammo\'s.' },
 			{ 'splprotSigned', 'Signed SPLPROT Checks', 'SPLPROT.2DA stat comparisons are signed: negative values compare correctly.' },
 			{ 'trapLimit', 'Trap Limit', 'TRAPLIMT.2DA cap respected exactly (no extra trap).' },
@@ -700,11 +700,17 @@ local function registerOwn()
 			{ 'negativeXPFeedback', 'Negative XP Message', 'AddXPObject with a negative value shows "The Party Has Lost Experience".' },
 			{ 'xpFloor', 'XP Floor', 'XP never goes below 0 (no wrap to the maximum).' },
 			{ 'eventTriggerObjects', 'Event Trigger Objects', 'Event triggers such as AttackedBy(PartySlot1,DEFAULT) follow whoever the object names now.' },
+			{ 'op183EffectLeak', 'Item Type Effects (op183)', 'Apply EFF if item type equipped no longer leaks memory on every pass where no such item is equipped.' },
+			{ 'partyXPSigned', 'Negative Party XP', 'AddExperienceParty and other party XP with a negative value take XP away (no huge XP gain with 2+ members).' },
+			{ 'op248MissingEff', 'Melee Hit Effect (op248)', 'op248 with a missing EFF file and parameter 2 bit 2 no longer crashes the game.' },
+			{ 'partyLevelSum', 'Party Level Sum', 'Average party level (spawn points, NPC level chart, AddXP2DA, rest encounters) no longer wraps when the levels add up past 255.' },
+			{ 'twoDARows', '2DA Indented Rows', '2DA files with indented rows or lines of spaces load correctly instead of corrupting memory.' },
+			{ nil, 'Unlimited Kits', 'Single-class kits past KITLIST row 256 get their class abilities (up to row 16383). Off: such kits crash or get wrong abilities, as without IEX.', 'Unlimited Kits' },
 		}
 		local entries = {}
 		for i, f in ipairs(fixes) do
 			local id = 'IEX_Options_Fix' .. i
-			local key = f[1] and ('Engine Fix ' .. f[1]) or 'Engine Fixes'
+			local key = f[4] or (f[1] and ('Engine Fix ' .. f[1])) or 'Engine Fixes'
 			S[id] = f[2]
 			S[id .. '_DESC'] = f[3] .. ' Baldur.lua [IEX] \'' .. key .. '\'. Default: on.'
 			EEex_Options_Register(id, EEex_Options_Option.new({

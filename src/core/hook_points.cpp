@@ -82,6 +82,9 @@ const Info kPoints[kCount] = {
      "Pathfinding Redux policy: allies walk through one another (pathfinding.cpp)"},
     {"emptyContainerOutline", "feature", Kind::Feature, Result::None,
      "CGameContainer::Render highlight outline: B3EmptyContainer module hook (modules.cpp)"},
+    {"kitLimit", "feature", Kind::Feature, Result::None,
+     "GetClassAbilityTable calls of Add/RemoveClassAbilities: CLAB of single-class kits on KITLIST rows 257-16383 "
+     "(kit_limit.cpp)"},
 };
 
 struct State_ {

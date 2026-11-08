@@ -32184,3 +32184,27 @@ const IEX.fix.swingRegs 0xe0c0d
 const IEX.fix.checkAddSite 0x1ef098
 const IEX.fix.xpFeedbackSite 0x171ec3
 const IEX.fix.slot.xpApply 0xcbfbc0
+# kitLimit (src/core/kit_limit.cpp, docs/KIT_LIMIT.md): the only two calls of CRuleTables::GetClassAbilityTable
+# (AddClassAbilities, RemoveClassAbilities), 2026-11-04.
+callsite 0x49f7f5 _ZNK11CRuleTables20GetClassAbilityTableEhj
+callsite 0x48db73 _ZNK11CRuleTables20GetClassAbilityTableEhj
+# engine fixes 2 (IEX 0.4.1; src/core/engine_fixes.cpp, docs/ENGINE_FIXES.md), 2026-11-07: op182 / op183 ApplyEffect
+# vtable slots, AddPartyXP division, op248 flag order, party level sums (DoAIUpdate / LoadArea / GetAveragePartyLevel),
+# C2DArray::Load row lines (count: first strtok, strcspn, next strtok; fill: first and next strtok).
+const IEX.fix.slot.equipItemApply 0xcc1fa0
+const IEX.fix.slot.equipTypeApply 0xcc2010
+const IEX.fix.partyXPDivSite 0x3062a0
+const IEX.fix.op248FlagSite 0x1e6a9c
+const IEX.fix.levelSum.spawn.0 0x227812
+const IEX.fix.levelSum.loadArea.0 0x2fe3c0
+const IEX.fix.levelSum.average.0 0x2f50a0
+const IEX.fix.c2da.countFirst 0x50de2d
+const IEX.fix.c2da.countSpan 0x50de4b
+const IEX.fix.c2da.countNext 0x50de61
+const IEX.fix.c2da.fillFirst 0x50dfdd
+const IEX.fix.c2da.fillNext 0x50e0cf
+# CGameArea::CheckRestEncounter party level sum (IEX 0.4.1, partyLevelSum), 2026-11-07: clear, add and read of
+# the stack slot [rbp-0xd8] widened to a dword.
+const IEX.fix.levelSum.rest.0 0x180a3d
+const IEX.fix.levelSum.rest.1 0x180a7c
+const IEX.fix.levelSum.rest.2 0x180dd8
