@@ -15,6 +15,7 @@
 #include "platform_memory.h"
 
 #include <cstring>
+#include <vector>
 
 namespace iex {
 
@@ -79,10 +80,13 @@ Word HookUiRefreshMenu()
 constexpr const char* kChitinUpdate = "_ZN7CChitin6UpdateEv";  // CChitin::Update()
 bool g_gameStateInitialized = false;
 
+void FlushPendingLoadedSprites();
+
 Word HookChitinUpdate(Word self)
 {
     FrameRateOnLogicTick();
     const Word result = Engine<Word (*)(Word)>(kChitinUpdate)(self);
+    FlushPendingLoadedSprites();
     DispatchEvent("EngineTickDone");
     if (!g_gameStateInitialized && g_mainMenuLoaded) {
         g_gameStateInitialized = true;
@@ -98,6 +102,42 @@ Word HookChitinUpdate(Word self)
 // CGameSprite constructor calls it once the creature is built from its CRE data (save load, area load, summon),
 // before the creature has a name or an area.
 constexpr const char* kObjectArrayAdd = "_ZN16CGameObjectArray3AddEPiP11CGameObjecti";
+std::vector<Word> g_pendingLoadedSprites;  // added to the object array, effect list not unmarshalled yet
+std::vector<Word> g_unmarshalledSprites;   // effect list unmarshalled, not added yet
+
+bool Take(std::vector<Word>& list, Word sprite)
+{
+    for (std::size_t i = 0; i < list.size(); ++i) {
+        if (list[i] == sprite) {
+            list.erase(list.begin() + static_cast<std::ptrdiff_t>(i));
+            return true;
+        }
+    }
+    return false;
+}
+
+void DispatchSpriteLoaded(Word sprite, bool underConstruction)
+{
+    static const TypeDesc* spriteType = engineTypes.Get("CGameSprite");
+    if (!spriteType)
+        return;
+    // Inside the constructor the name strings are not filled in yet: CGameSprite::GetName would read garbage.
+    const Word saved = g_spriteUnderConstruction;
+    g_spriteUnderConstruction = underConstruction ? sprite : 0;
+    DispatchObjectEvent("SpriteLoaded", sprite, spriteType);
+    g_spriteUnderConstruction = saved;
+}
+
+void FlushPendingLoadedSprites()
+{
+    g_unmarshalledSprites.clear();
+    if (g_pendingLoadedSprites.empty())
+        return;
+    std::vector<Word> pending;
+    pending.swap(g_pendingLoadedSprites);
+    for (Word sprite : pending)
+        DispatchSpriteLoaded(sprite, false);
+}
 constexpr std::uint8_t kObjectTypeSprite = 0x31;
 bool g_objectArrayAddHooked = false;
 
@@ -114,10 +154,14 @@ Word HookObjectArrayAdd(Word self, Word outId, Word object, Word timeout)
     if (object && !(result & 0xff) && typeField && sprite &&
         *reinterpret_cast<const std::uint8_t*>(object + offset) == kObjectTypeSprite)
     {
-        // The constructor has not filled in the name strings yet: CGameSprite::GetName would read garbage.
-        g_spriteUnderConstruction = object;
-        DispatchObjectEvent("SpriteLoaded", object, sprite);
-        g_spriteUnderConstruction = 0;
+        // The constructor adds the creature either before or after it builds the local variable table and
+        // unmarshals the effect list. SpriteLoaded runs once both are done, as under EEex (loaded listeners see
+        // m_pLocalVariables, the EEEX_UUID local and the marshal handler data): now if the effects are already
+        // in, else right after the effect list (SpriteEffectsUnmarshalled), at the latest after this tick.
+        if (Take(g_unmarshalledSprites, object))
+            DispatchSpriteLoaded(object, true);
+        else
+            g_pendingLoadedSprites.push_back(object);
     }
     return result;
 }
@@ -150,6 +194,24 @@ Word HookSpriteSetCurrAction(Word sprite, Word action)
         *reinterpret_cast<const std::int16_t*>(sprite + curAction + actionId) != 0)
         DispatchObjectsEvent("SpriteStartedAction", sprite, spriteType, sprite + curAction, actionType);
     return result;
+}
+
+// --- Sprites: creature about to be destroyed ---
+
+// The CGameSprite destructor slot that `delete` goes through (Linux: the deleting destructor D0(this); Windows: the
+// one MSVC deleting destructor (this, flags)). The second argument is passed on unchanged on both. Listeners get
+// the creature while it is still intact (per-creature UUID bookkeeping: lua/EEex_Sprite.lua).
+constexpr const char* kSpriteDestructorSlot = "IEX_VtSlot_SpriteDestructor";
+Word g_spriteDestructor = 0;
+
+Word HookSpriteDestructor(Word sprite, Word flags)
+{
+    static const TypeDesc* spriteType = engineTypes.Get("CGameSprite");
+    Take(g_pendingLoadedSprites, sprite);
+    Take(g_unmarshalledSprites, sprite);
+    if (sprite && spriteType)
+        DispatchObjectEvent("IEX_SpriteDestroyed", sprite, spriteType);
+    return reinterpret_cast<Word (*)(Word, Word)>(g_spriteDestructor)(sprite, flags);
 }
 
 bool HookVtableSlot(const char* slotName, const void* replacement, Word& original)
@@ -284,6 +346,20 @@ bool ObjectArrayAddHooked()
     return g_objectArrayAddHooked;
 }
 
+void SpriteEffectsUnmarshalled(std::uintptr_t sprite)
+{
+    if (!sprite)
+        return;
+    if (Take(g_pendingLoadedSprites, sprite)) {
+        DispatchSpriteLoaded(sprite, true);
+    } else if (g_objectArrayAddHooked) {
+        Take(g_unmarshalledSprites, sprite);
+        g_unmarshalledSprites.push_back(sprite);
+        if (g_unmarshalledSprites.size() > 256)
+            g_unmarshalledSprites.erase(g_unmarshalledSprites.begin());
+    }
+}
+
 void InstallEventHooks()
 {
     HookAll(kUiLoadMenu, reinterpret_cast<const void*>(&HookUiLoadMenu));
@@ -293,6 +369,9 @@ void InstallEventHooks()
     Log("Event hook sprite SetCurrAction slot: %s",
         HookVtableSlot(kSpriteSetCurrActionSlot, reinterpret_cast<const void*>(&HookSpriteSetCurrAction),
                        g_spriteSetCurrAction) ? "on" : "off");
+    Log("Event hook sprite destructor slot: %s",
+        HookVtableSlot(kSpriteDestructorSlot, reinterpret_cast<const void*>(&HookSpriteDestructor),
+                       g_spriteDestructor) ? "on" : "off");
     HookAll(kPollEvent, reinterpret_cast<const void*>(&HookPollEvent));
     HookAll(kAreaRenderZoomed, reinterpret_cast<const void*>(&HookAreaRenderZoomed));
     HookAll(kSetAllSpellsMemorized, reinterpret_cast<const void*>(&HookSetAllSpellsMemorized));

@@ -7,7 +7,9 @@
 //     list as pseudo effect records (0x108 bytes each), the first one starting with "X-BIV1.0";
 //   - CGameSprite::Unmarshal (V2 effect records): the records from the "X-BIV1.0" one on are cut off the list
 //     before the engine decodes it, and IEX_Marshal_Import(sprite, bytes or nil) runs (inside the creature's
-//     constructor, before the loaded listeners).
+//     constructor, before the loaded listeners). The creature's EEEX_UUID op187 record is cut out too and handed
+//     to IEX_UUID_FromEffects (per-creature UUID, docs/UUID.md); then the SpriteLoaded event runs
+//     (event_hooks.h: SpriteEffectsUnmarshalled).
 //   - IEX_IsMarshallingCopy(): true while CGameSprite::Copy marshals a creature to clone it (EEex.IsMarshallingCopy).
 struct lua_State;
 

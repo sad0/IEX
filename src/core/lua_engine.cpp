@@ -318,10 +318,16 @@ std::uintptr_t FindVariable(std::uintptr_t hash, const std::string& name)
     return 0;
 }
 
+// A creature's m_pLocalVariables holds a non-pointer value early in its constructor (Windows: all bits set).
+bool PlausibleHash(std::uintptr_t hash)
+{
+    return hash >= 0x10000 && hash < 0x800000000000ull;
+}
+
 std::uintptr_t CheckHash(lua_State* L)
 {
     const std::uintptr_t hash = ToObjectAddress(L, 1);
-    if (!hash || !Layout().ok)
+    if (!PlausibleHash(hash) || !Layout().ok)
         LuaError(L, "IEX: CVariableHash object expected");
     return hash;
 }
@@ -343,6 +349,24 @@ int LuaVariableGet(lua_State* L)
     const char* text = reinterpret_cast<const char*>(entry + Layout().stringValue);
     lua.pushlstring(L, text, strnlen(text, 32));
     return 2;
+}
+
+// IEX_VariableFind(hash, name) -> the CVariable object (fields m_intValue, m_dWValue, m_stringValue...), nil when the
+// variable does not exist. Backs CVariableHash:find(name), which mods call on m_pLocalVariables.
+int LuaVariableFind(lua_State* L)
+{
+    const std::uintptr_t hash = ToObjectAddress(L, 1);
+    if (!PlausibleHash(hash) || !Layout().ok) {
+        lua.pushnil(L);
+        return 1;
+    }
+    const char* name = lua.tolstring(L, 2, nullptr);
+    const std::uintptr_t entry = name ? FindVariable(hash, NormalizeVariableName(name)) : 0;
+    if (entry)
+        PushObject(L, entry, engineTypes.Get("CVariable"));
+    else
+        lua.pushnil(L);
+    return 1;
 }
 
 // IEX_VariableSet(hash, name, intValue or nil, stringValue or nil): creates the variable if needed.
@@ -399,6 +423,8 @@ void OpenLuaEngine(lua_State* L)
     lua.setglobal(L, "IEX_VariableGet");
     lua.pushcclosure(L, LuaVariableSet, 0);
     lua.setglobal(L, "IEX_VariableSet");
+    lua.pushcclosure(L, LuaVariableFind, 0);
+    lua.setglobal(L, "IEX_VariableFind");
     lua.pushcclosure(L, LuaMenuLoadFile, 0);
     lua.setglobal(L, "IEX_MenuLoadFile");
     lua.pushcclosure(L, LuaKeyFromName, 0);

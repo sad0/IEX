@@ -156,6 +156,20 @@ Limits:
 - Per-render side effects that run more (or less) often when N != T: touch-scroll inertia decay, the
   `StartTime` interface countdown, the area flash countdown (CGameArea +0xfac), menu Lua that counts frames.
 
+## Show FPS (IEX 0.4.2, lua/IEX_FrameRate.lua, menu IEX_FPS in ui/IEXOPT.menu)
+
+Options > IEX > Uncap FPS > 'Show FPS (IEX)', Baldur.lua `SetPrivateProfileString('IEX','Show FPS','1')`, off
+by default. A small "NN FPS" text at the top right of the world screen, left of the portrait column (clear of the
+action bar and of SadoEE's top-center counter). The menu's first label is evaluated once per drawn frame and
+counts it, so the number is the frames the player sees (extra frames between ticks included), averaged over half a
+second. The menu is pushed on the world screen only while the option is on (kept on the stack after loads by an
+`EngineTickDone` listener) and popped when it is turned off; with the option off it costs nothing per frame.
+
+Tests 2026-11-22 (Windows and Linux WSLg, vanilla BG2EE 2.7.3 copies, Chapter 1 save, `IEX_GetRenderRate()` as
+reference): default off; on / off / on through `EEex_Options_Set` takes effect at once (screenshots); on at
+startup shows after a load; counter vs engine frames/s: 59 / 60 (60 Hz, VSync), 100 / 100 (Frame Rate 100,
+VSync off), 135-141 / 140-143 (144 Hz).
+
 ## Motion interpolation (framerate.cpp, on by default in the extra-frame mode)
 
 What moves where (own analysis, Linux objdump/Ghidra + Windows objdump, entries in `verified_fps.json`):
@@ -250,3 +264,30 @@ set=0    area frames/s=29.9 engine fps=30 tps=30 | game ticks/s=14.96 | walk 104
 Logic ticks and game time per real second are unchanged; walking speed stays in the same 84-106 px/s range
 with and without (path start varies). The SadoEE FPS counter shows 60 FPS (green) with IEX_SetFrameRate(120).
 Linux: see the motion interpolation evidence above.
+
+## Listener-heavy mods: where the time goes (measured 2026-11-08, tools/speedtest phases `bench` and `perf<N>`)
+
+BG2EE stack with Tweaks Anthology (65 OpcodeListsResolved listeners), 14 ogres spawned next to a party of 6, VSync off,
+private copy, IEX only (no EEex comparison). The PC is shared: wall-clock runs vary up to 4x, so builds were alternated.
+
+- Each creature's effect lists are re-evaluated about once per tick (490 per second for ~16 creatures per tick), so
+  grouping per tick would gain little, and many TA listeners watch single frames (`m_attackFrame == 6`, casting), so
+  they cannot run less often. EEex_Opcode_AddDeferredListsResolvedListener is not a large gain in this case under IEX.
+- One listener pass on one creature: 0.5-0.7 ms and 94 KB of Lua data, about 34 MB/s in the fight. Almost all of it is
+  the mods' own Lua: closures, tables, list walks. The dispatch took 370 ms per second before the changes below.
+- The engine's own ProcessEffectList is about 40 ms per second: the listeners are 90% of the cost.
+
+Changes (`lua_objects.cpp`, `EEex_Utility.lua`, `IEX_FrameRate.lua`), 3 alternating runs of each build:
+
+| | before | after |
+|---|---|---|
+| Dispatch, ms per real second | 369-377 | 271-280 |
+| Frames per second (uncapped) | 141-144 | 170-183 |
+| Frame time p95 / p99, ms | 22-23 / 34-39 | 16-17 / 27-31 |
+| One listener pass, best round | 628-742 us | 464-484 us |
+| `EEex_GameObject_IsSprite` | ~600 ns | ~270 ns |
+
+Field names resolve through a cache keyed by type and interned name (each cached name anchored in the registry, so its
+address cannot be reused); the object metatable is read through a light userdata key; no walk through native methods
+when the chain has none; no cast in IsSprite for an object already typed as a sprite; `collectgarbage('setpause', 400)`
+([IEX] 'Lua GC Pause'): about 10% in the bench, peak Lua memory 80 -> 112 MB. The rest of the time is the mods' code.

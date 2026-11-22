@@ -207,6 +207,252 @@ local function atkStep(ph, t)
 	return true
 end
 
+-----------------------------------------------------------------------
+-- "perf<N>" phase: where the time goes with effect-list listeners (Tweaks Anthology). Spawns N hostile creatures next
+-- to the party, then for PerfMs: frame intervals, IEX's counters around CGameSprite::ProcessEffectList, per-listener
+-- time and Lua allocation. [SpeedTest] 'PerfWrap' 0 = no per-listener timing, 'PerfNoListeners' 1 = listeners removed
+-- for the phase (the ceiling of what any fix could gain).
+-----------------------------------------------------------------------
+local PERF_MS = tonumber(iniStr('PerfMs', '30000')) or 30000
+
+local function perfWrapListeners(pf)
+	local list = IEX_Listeners and IEX_Listeners.OpcodeListsResolved
+	if not list then return end
+	pf.saved = list
+	local copy = {}
+	if iniStr('PerfNoListeners', '0') == '1' then
+		IEX_Listeners.OpcodeListsResolved = copy
+		pf.listeners = 0
+		return
+	end
+	pf.listeners = #list
+	pf.stats = {}
+	if iniStr('PerfWrap', '1') ~= '1' or not IEX_PerfNow then
+		pf.saved = nil
+		return
+	end
+	for i, fn in ipairs(list) do
+		local st = { n = 0, us = 0, max = 0, src = '?' }
+		pcall(function()
+			local info = debug.getinfo(fn, 'S')
+			st.src = tostring(info.short_src):match('[^/\92]*$') .. ':' .. tostring(info.linedefined)
+		end)
+		pf.stats[i] = st
+		local perfNow = IEX_PerfNow
+		copy[i] = function(...)
+			local t0 = perfNow()
+			local a = fn(...)
+			local d = perfNow() - t0
+			st.n, st.us = st.n + 1, st.us + d
+			if d > st.max then st.max = d end
+			return a
+		end
+	end
+	IEX_Listeners.OpcodeListsResolved = copy
+end
+
+local function perfStart(ph, n)
+	local l = leader()
+	local cre = iniStr('PerfCre', 'OGRE01')
+	for i = 1, n do
+		local col, row = (i - 1) % 5, math.floor((i - 1) / 5)
+		pcall(EEex_Action_QueueResponseStringOnAIBase, string.format('CreateCreature("%s",[%d.%d],0)', cre,
+			l.m_pos.x + 120 + 40 * col, l.m_pos.y - 80 + 40 * row), l)
+	end
+	ph.perf = { n = n, frames = {}, allocKb = 0, drops = 0, lastKb = collectgarbage('count') }
+end
+
+local function perfStep(ph, t)
+	local pf = ph.perf
+	local c = IEX_PerfNow and IEX_PerfNow() or now() * 1000
+	if not pf.begun then
+		if t < 3000 then return false end
+		pf.begun, pf.last, pf.g0 = c, c, gtime()
+		perfWrapListeners(pf)
+		if IEX_PerfCounters then IEX_PerfCounters(true) end
+		pf.lastKb = collectgarbage('count')
+		return false
+	end
+	pf.frames[#pf.frames + 1] = c - pf.last
+	pf.last = c
+	local kb = collectgarbage('count')
+	if kb >= pf.lastKb then pf.allocKb = pf.allocKb + kb - pf.lastKb else pf.drops = pf.drops + 1 end
+	pf.lastKb = kb
+	if t < 3000 + PERF_MS then return false end
+	local realS = (c - pf.begun) / 1e6
+	if pf.saved then IEX_Listeners.OpcodeListsResolved = pf.saved end
+	local fr = pf.frames
+	table.sort(fr)
+	local function pct(p) return fr[math.max(1, math.floor(#fr * p))] / 1000 end
+	local sum = 0
+	for _, v in ipairs(fr) do sum = sum + v end
+	P.emit(string.format('phase=%s creatures=%d listeners=%s real_s=%.1f game_ticks_per_s=%.2f frames_per_s=%.1f frame_ms avg=%.2f p50=%.2f p95=%.2f p99=%.2f p999=%.2f max=%.2f alloc_kb_per_s=%.0f gc_drops=%d lua_kb=%.0f',
+		ph.spec, pf.n, tostring(pf.listeners), realS, (gtime() - pf.g0) / realS, #fr / realS, sum / #fr / 1000, pct(0.5), pct(0.95), pct(0.99), pct(0.999),
+		fr[#fr] / 1000, pf.allocKb / realS, pf.drops, collectgarbage('count')))
+	if IEX_PerfCounters then
+		local calls, reevals, totalUs, dispatchUs = IEX_PerfCounters(false)
+		P.emit(string.format('  engine ProcessEffectList calls/s=%.0f reevals/s=%.0f total_ms_per_s=%.1f dispatch_ms_per_s=%.1f',
+			calls / realS, reevals / realS, totalUs / 1000 / realS, dispatchUs / 1000 / realS))
+	end
+	if pf.stats and #pf.stats > 0 then
+		local order, total = {}, 0
+		for _, st in ipairs(pf.stats) do order[#order + 1] = st total = total + st.us end
+		table.sort(order, function(a, b) return a.us > b.us end)
+		P.emit(string.format('  listeners total_ms_per_s=%.1f', total / 1000 / realS))
+		for i = 1, math.min(25, #order) do
+			local st = order[i]
+			P.emit(string.format('  listener %s n/s=%.0f ms_per_s=%.2f avg_us=%.1f max_ms=%.2f', st.src, st.n / realS, st.us / 1000 / realS,
+				st.n > 0 and st.us / st.n or 0, st.max / 1000))
+		end
+	end
+	return true
+end
+
+-----------------------------------------------------------------------
+-- "bench" phase: noise-proof timing of IEX's bindings and of a full listener pass on one creature, game paused by
+-- the loop itself. Each case runs in several rounds; the best round is reported (a busy PC only makes rounds slower).
+-----------------------------------------------------------------------
+local function benchRun()
+	local sprite = leader()
+	local perfNow = IEX_PerfNow
+	local cases = {
+		{ 'field_int', 200000, function(n) for _ = 1, n do local _ = sprite.m_id end end },
+		{ 'field_nested', 100000, function(n) for _ = 1, n do local _ = sprite.m_derivedStats.m_generalState end end },
+		{ 'field_base', 200000, function(n) for _ = 1, n do local _ = sprite.m_objectType end end },
+		{ 'method_lookup', 100000, function(n) for _ = 1, n do local _ = sprite.getLocalInt end end },
+		{ 'getLocalInt', 20000, function(n) for _ = 1, n do sprite:getLocalInt('gtBench') end end },
+		{ 'IsSprite', 100000, function(n) for _ = 1, n do EEex_GameObject_IsSprite(sprite) end end },
+		{ 'IsBitSet', 200000, function(n) for _ = 1, n do EEex_IsBitSet(5, 2) end end },
+		{ 'GetUDAux', 100000, function(n) for _ = 1, n do EEex_GetUDAux(sprite) end end },
+		{ 'dispatch_empty', 100000, function(n) for _ = 1, n do IEX_Dispatch('IEX_BenchNoListener', sprite) end end },
+		{ 'listeners_pass', 300, function(n) for _ = 1, n do IEX_Dispatch('OpcodeListsResolved', sprite) end end },
+	}
+	for _, case in ipairs(cases) do
+		local best
+		for _ = 1, 7 do
+			local t0 = perfNow()
+			case[3](case[2])
+			local d = perfNow() - t0
+			if not best or d < best then best = d end
+		end
+		P.emit(string.format('bench %s ns=%.0f', case[1], best * 1000 / case[2]))
+	end
+	-- Which functions the listeners call: counts, inclusive time and allocation per listener pass, for the sprite's
+	-- whole party (globals named EEex_*, IEX_*, Infinity_*, GT_* and the CGameSprite methods, wrapped for this block).
+	if iniStr('BenchApi', '1') == '1' then
+		local stats, restore = {}, {}
+		local function wrapFn(tbl, key, label)
+			local fn = rawget(tbl, key)
+			if type(fn) ~= 'function' or key == 'IEX_PerfNow' or key == 'IEX_Dispatch' or key == 'IEX_EnsureMissingTrap' then return end
+			local st = { name = label, n = 0, us = 0, kb = 0 }
+			stats[#stats + 1] = st
+			restore[#restore + 1] = { tbl, key, fn }
+			rawset(tbl, key, function(...)
+				local k0, t0 = collectgarbage('count'), perfNow()
+				local r = { fn(...) }
+				st.us = st.us + perfNow() - t0
+				st.kb = st.kb + collectgarbage('count') - k0
+				st.n = st.n + 1
+				return (table.unpack or unpack)(r)
+			end)
+		end
+		local names = {}
+		for k in pairs(_G) do
+			if type(k) == 'string' and (k:find('^EEex_') or k:find('^IEX_') or k:find('^Infinity_') or k:find('^GT_')) then names[#names + 1] = k end
+		end
+		for _, k in ipairs(names) do wrapFn(_G, k, k) end
+		for _, cls in ipairs({ 'CGameSprite', 'CGameAIBase', 'CGameObject' }) do
+			local t = _G[cls]
+			if type(t) == 'table' then
+				local keys = {}
+				for k in pairs(t) do if type(k) == 'string' then keys[#keys + 1] = k end end
+				for _, k in ipairs(keys) do wrapFn(t, k, cls .. ':' .. k) end
+			end
+		end
+		collectgarbage('stop')
+		local passes = 0
+		for slot = 0, 5 do
+			local m = EEex_Sprite_GetInPortrait(slot)
+			if m then
+				for _ = 1, 10 do
+					IEX_Dispatch('OpcodeListsResolved', m)
+					passes = passes + 1
+				end
+			end
+		end
+		collectgarbage('restart')
+		for _, r in ipairs(restore) do rawset(r[1], r[2], r[3]) end
+		table.sort(stats, function(x, y) return x.us > y.us end)
+		for i = 1, math.min(45, #stats) do
+			local st = stats[i]
+			if st.n > 0 then
+				P.emit(string.format('api %-48s calls/pass=%7.1f us/pass=%8.1f us/call=%7.2f kb/pass=%7.2f', st.name, st.n / passes, st.us / passes, st.us / st.n, st.kb / passes))
+			end
+		end
+	end
+	-- Share of the garbage collector: the same passes with it running and stopped, alternating; medians.
+	do
+		local function median(t) table.sort(t) return t[math.ceil(#t / 2)] end
+		local on, off, full = {}, {}, {}
+		local PASSES = 200
+		for _ = 1, 9 do
+			collectgarbage('restart')
+			local t0 = perfNow()
+			for _ = 1, PASSES do IEX_Dispatch('OpcodeListsResolved', sprite) end
+			on[#on + 1] = (perfNow() - t0) / PASSES
+			t0 = perfNow()
+			collectgarbage('collect')
+			full[#full + 1] = perfNow() - t0
+			collectgarbage('stop')
+			t0 = perfNow()
+			for _ = 1, PASSES do IEX_Dispatch('OpcodeListsResolved', sprite) end
+			off[#off + 1] = (perfNow() - t0) / PASSES
+			collectgarbage('collect')
+		end
+		collectgarbage('restart')
+		P.emit(string.format('bench gc pass_us gc_on=%.0f gc_off=%.0f full_collect_ms=%.1f lua_kb=%.0f', median(on), median(off), median(full) / 1000, collectgarbage('count')))
+	end
+	do local v = collectgarbage('setpause', 200) collectgarbage('setpause', v) P.emit('bench gc_pause_in_use=' .. tostring(v)) end
+	-- GC settings: the same long run of passes (several whole GC cycles) under each setting, alternating; medians.
+	do
+		local function median(t) table.sort(t) return t[math.ceil(#t / 2)] end
+		local settings = { { 200, 200 }, { 300, 200 }, { 400, 200 }, { 600, 200 }, { 400, 400 } }
+		local PASSES = 1500
+		local res = {}
+		for round = 1, 5 do
+			for i, st in ipairs(settings) do
+				collectgarbage('collect')
+				local oldPause = collectgarbage('setpause', st[1])
+				local oldMul = collectgarbage('setstepmul', st[2])
+				local peak = 0
+				local t0 = perfNow()
+				for k = 1, PASSES do
+					IEX_Dispatch('OpcodeListsResolved', sprite)
+					if k % 20 == 0 then
+						local c = collectgarbage('count')
+						if c > peak then peak = c end
+					end
+				end
+				local d = (perfNow() - t0) / PASSES
+				collectgarbage('setpause', oldPause)
+				collectgarbage('setstepmul', oldMul)
+				res[i] = res[i] or { t = {}, peak = 0 }
+				res[i].t[round] = d
+				if peak > res[i].peak then res[i].peak = peak end
+			end
+		end
+		for i, st in ipairs(settings) do
+			P.emit(string.format('bench gcset pause=%d stepmul=%d pass_us=%.0f peak_mb=%.0f', st[1], st[2], median(res[i].t), res[i].peak / 1024))
+		end
+	end
+	local kb = collectgarbage('count')
+	collectgarbage('stop')
+	local k0 = collectgarbage('count')
+	for _ = 1, 50 do IEX_Dispatch('OpcodeListsResolved', sprite) end
+	P.emit(string.format('bench listeners_pass_alloc_kb=%.1f', (collectgarbage('count') - k0) / 50))
+	collectgarbage('restart')
+end
+
 local function startPhase(spec)
 	local ph = { spec = spec, t0 = now() }
 	ph.ta = spec:find('^ta') ~= nil
@@ -219,6 +465,18 @@ local function startPhase(spec)
 		EEex_Action_QueueResponseStringOnAIBase('SmallWait(5)', l)
 		P.ph = ph
 		P.status('phase clr')
+		return
+	end
+	if spec == 'bench' then
+		benchRun()
+		P.status('phase bench done')
+		return
+	end
+	local perfN = tonumber(spec:match('^perf(%d+)$'))
+	if perfN then
+		perfStart(ph, perfN)
+		P.ph = ph
+		P.status('phase ' .. spec)
 		return
 	end
 	if spec == 'atk' then
@@ -273,6 +531,13 @@ local function stepPhase()
 			c.late = true
 			state('600ms')
 			P.emit('phase=clr')
+			P.ph = nil
+			return true
+		end
+		return false
+	end
+	if ph.perf then
+		if perfStep(ph, t) then
 			P.ph = nil
 			return true
 		end

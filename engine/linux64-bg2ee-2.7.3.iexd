@@ -2612,6 +2612,7 @@ symbol IEX_VtSlot_SpriteAddEffect 0xcf9618
 symbol IEX_VtSlot_SpriteEvalTrigger 0xcf9600
 symbol IEX_VtSlot_SpriteExecuteAction 0xcf9638
 symbol IEX_VtSlot_SpriteSetCurrAction 0xcf9650
+symbol IEX_VtSlot_SpriteDestructor 0xcf9538
 symbol ISSUING_DIST_POINT_free 0x8eeb40
 symbol ISSUING_DIST_POINT_it 0xce81c0
 symbol ISSUING_DIST_POINT_new 0x8eeb30

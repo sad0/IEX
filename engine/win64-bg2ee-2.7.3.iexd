@@ -863,6 +863,7 @@ symbol IEX_VtSlot_SpriteAddEffect 0x598c50
 symbol IEX_VtSlot_SpriteEvalTrigger 0x598c30
 symbol IEX_VtSlot_SpriteExecuteAction 0x598c68
 symbol IEX_VtSlot_SpriteSetCurrAction 0x598c80
+symbol IEX_VtSlot_SpriteDestructor 0x598b68
 symbol SDL_AddEventWatch 0x451830
 symbol SDL_AddHintCallback 0x452a30
 symbol SDL_AddTimer 0x452fb0

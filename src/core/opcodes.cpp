@@ -23,6 +23,7 @@
 #include "platform_memory.h"
 
 #include <cctype>
+#include <chrono>
 #include <climits>
 #include <cstdio>
 #include <cstring>
@@ -464,15 +465,74 @@ Word HookStatsCopy(Word dst, Word src)
     return result;
 }
 
+// Profiling (IEX_PerfCounters, tools/speedtest "perf" phase): off unless asked for, one flag test per call then.
+struct PerfCounters {
+    bool on = false;
+    std::uint64_t calls = 0, reevals = 0;
+    double totalUs = 0, dispatchUs = 0;
+};
+PerfCounters g_perf;
+
+double PerfNowUs()
+{
+    using Clock = std::chrono::steady_clock;
+    static const Clock::time_point start = Clock::now();
+    return std::chrono::duration<double, std::micro>(Clock::now() - start).count();
+}
+
+void DispatchListsResolved(Word sprite)
+{
+    g_dispatching.insert(sprite);
+    static const TypeDesc* const spriteType = engineTypes.Get("CGameSprite");
+    DispatchObjectEvent("OpcodeListsResolved", sprite, spriteType);
+    g_dispatching.erase(sprite);
+}
+
 Word HookProcessEffectList(Word sprite, Word arg)
 {
-    const Word result = Engine<Word (*)(Word, Word)>(kProcessEffectList)(sprite, arg);
-    if (g_reevaluated.erase(sprite) && !g_dispatching.count(sprite)) {
-        g_dispatching.insert(sprite);
-        DispatchObjectEvent("OpcodeListsResolved", sprite, engineTypes.Get("CGameSprite"));
-        g_dispatching.erase(sprite);
+    const auto engineCall = Engine<Word (*)(Word, Word)>(kProcessEffectList);
+    if (!g_perf.on) {
+        const Word result = engineCall(sprite, arg);
+        if (g_reevaluated.erase(sprite) && !g_dispatching.count(sprite))
+            DispatchListsResolved(sprite);
+        return result;
     }
+    const double t0 = PerfNowUs();
+    const Word result = engineCall(sprite, arg);
+    ++g_perf.calls;
+    if (g_reevaluated.erase(sprite) && !g_dispatching.count(sprite)) {
+        ++g_perf.reevals;
+        const double t1 = PerfNowUs();
+        DispatchListsResolved(sprite);
+        g_perf.dispatchUs += PerfNowUs() - t1;
+    }
+    g_perf.totalUs += PerfNowUs() - t0;
     return result;
+}
+
+// IEX_PerfNow() -> microseconds (float), for timing Lua code.
+int LuaPerfNow(lua_State* L)
+{
+    lua.pushnumber(L, PerfNowUs());
+    return 1;
+}
+
+// IEX_PerfCounters(true) resets and starts counting; IEX_PerfCounters(false) stops and returns
+// ProcessEffectList calls, re-evaluations, total us (dispatch included), us in the OpcodeListsResolved dispatch.
+int LuaPerfCounters(lua_State* L)
+{
+    const bool on = lua.toboolean(L, 1) != 0;
+    if (on) {
+        g_perf = PerfCounters{};
+        g_perf.on = true;
+        return 0;
+    }
+    g_perf.on = false;
+    lua.pushnumber(L, static_cast<double>(g_perf.calls));
+    lua.pushnumber(L, static_cast<double>(g_perf.reevals));
+    lua.pushnumber(L, g_perf.totalUs);
+    lua.pushnumber(L, g_perf.dispatchUs);
+    return 4;
 }
 
 // Linux tail jumps (E9) to ProcessEffectList are hooked with HookJumpSite (callsite_hook.h).
@@ -817,6 +877,10 @@ void OpenLuaOpcodes(lua_State* L)
     lua.setglobal(L, "IEX_GetExtendedStat");
     lua.pushcclosure(L, LuaIsImmuneToOpcode, 0);
     lua.setglobal(L, "IEX_IsImmuneToOpcode");
+    lua.pushcclosure(L, LuaPerfNow, 0);
+    lua.setglobal(L, "IEX_PerfNow");
+    lua.pushcclosure(L, LuaPerfCounters, 0);
+    lua.setglobal(L, "IEX_PerfCounters");
     LoadExtendedStats();
 }
 

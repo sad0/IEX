@@ -13,6 +13,7 @@
 #include <cstdint>
 #include <cstring>
 #include <string>
+#include <vector>
 
 namespace iex {
 
@@ -154,6 +155,50 @@ Word HookListMarshal(Word list, Word out, Word a2, Word a3, Word a4)
     return static_cast<std::uint32_t>(size + static_cast<std::int32_t>(extra));
 }
 
+// Per-creature UUID (docs/UUID.md): the engine saves a creature's LOCALS as op187 (Set Local Variable) records in its
+// effect list (variable name at record + 0xa0, value at + 0x14, the CVariable's m_dWValue at + 0x18) and applies
+// them later. The EEEX_UUID record is taken out of the list here and handed to Lua (IEX_UUID_FromEffects), which
+// writes the local before the loaded listeners, or gives the creature a new number (copies): an engine-applied
+// record would otherwise bring the old number back. The engine writes the record again from the local on save.
+constexpr std::uint32_t kOpSetLocalVariable = 187;
+constexpr std::size_t kRecOpcode = 0x08, kRecParam1 = 0x14, kRecParam2 = 0x18, kRecVarName = 0xa0;
+
+bool IsUuidRecord(const std::uint8_t* rec)
+{
+    std::uint32_t opcode;
+    std::memcpy(&opcode, rec + kRecOpcode, 4);
+    if (opcode != kOpSetLocalVariable)
+        return false;
+    static const char kName[] = "EEEX_UUID";
+    for (std::size_t i = 0; i < sizeof(kName); ++i) {  // NUL included: exact name
+        char c = static_cast<char>(rec[kRecVarName + i]);
+        if (c >= 'a' && c <= 'z')
+            c = static_cast<char>(c - 'a' + 'A');
+        if (c != kName[i])
+            return false;
+    }
+    return true;
+}
+
+void UuidFromEffects(Word sprite, std::int32_t low, std::uint32_t high)
+{
+    if (!g_L)
+        return;
+    lua_State* L = g_L;
+    const int top = lua.gettop(L);
+    lua.getglobal(L, "IEX_UUID_FromEffects");
+    if (lua.type(L, -1) == LUA_TFUNCTION) {
+        PushSprite(L, sprite);
+        lua.pushinteger(L, low);
+        lua.pushnumber(L, static_cast<double>(high));
+        if (lua.pcallk(L, 3, 0, 0, 0, nullptr) != 0) {
+            const char* err = lua.tolstring(L, -1, nullptr);
+            Log("IEX_UUID_FromEffects failed: %s", err ? err : "(unknown)");
+        }
+    }
+    lua.settop(L, top);
+}
+
 // CGameEffectList::Unmarshal(uchar* data, uint size, CGameSprite* sprite, uchar v2Records).
 void HookListUnmarshal(Word list, Word data, Word size, Word sprite, Word v2)
 {
@@ -161,19 +206,53 @@ void HookListUnmarshal(Word list, Word data, Word size, Word sprite, Word v2)
     const std::uint32_t bytes = static_cast<std::uint32_t>(size);
     if (!sprite || !(v2 & 0xff) || !data) {
         original(list, data, size, sprite, v2);
+        SpriteEffectsUnmarshalled(sprite);
         return;
     }
     const auto* p = reinterpret_cast<const std::uint8_t*>(data);
     std::uint32_t at = 0;
     while (at + kRecord <= bytes && std::memcmp(p + at, kMagic, sizeof(kMagic)) != 0)
         at += kRecord;
-    if (at + kRecord > bytes) {
-        original(list, data, size, sprite, v2);
-        Import(sprite, nullptr, 0);
-        return;
+    const bool hasHandlerData = at + kRecord <= bytes;
+    const std::uint32_t effectBytes = hasHandlerData ? at : bytes;
+
+    // EEEX_UUID records: cut out of a private copy of the effect records.
+    std::vector<std::uint8_t> filtered;
+    bool uuidFound = false;
+    std::int32_t uuidLow = 0;
+    std::uint32_t uuidHigh = 0;
+    for (std::uint32_t r = 0; r + kRecord <= effectBytes; r += kRecord) {
+        if (!IsUuidRecord(p + r))
+            continue;
+        if (filtered.empty() && !uuidFound)
+            filtered.assign(p, p + effectBytes);
+        if (!uuidFound) {
+            std::memcpy(&uuidLow, p + r + kRecParam1, 4);
+            std::memcpy(&uuidHigh, p + r + kRecParam2, 4);
+            uuidFound = true;
+        }
     }
-    original(list, data, at, sprite, v2);
-    Import(sprite, p + at + sizeof(kMagic), bytes - at - sizeof(kMagic));
+    if (uuidFound) {
+        std::vector<std::uint8_t> kept;
+        kept.reserve(filtered.size());
+        for (std::size_t r = 0; r + kRecord <= filtered.size(); r += kRecord) {
+            if (!IsUuidRecord(filtered.data() + r))
+                kept.insert(kept.end(), filtered.begin() + static_cast<std::ptrdiff_t>(r),
+                            filtered.begin() + static_cast<std::ptrdiff_t>(r + kRecord));
+        }
+        filtered.swap(kept);
+        original(list, filtered.empty() ? data : reinterpret_cast<Word>(filtered.data()),
+                 static_cast<Word>(filtered.size()), sprite, v2);
+    } else {
+        original(list, data, effectBytes, sprite, v2);
+    }
+    if (hasHandlerData)
+        Import(sprite, p + at + sizeof(kMagic), bytes - at - sizeof(kMagic));
+    else
+        Import(sprite, nullptr, 0);
+    if (uuidFound)
+        UuidFromEffects(sprite, uuidLow, uuidHigh);
+    SpriteEffectsUnmarshalled(sprite);
 }
 
 int HookAll(const char* target, Word& original, const void* replacement)

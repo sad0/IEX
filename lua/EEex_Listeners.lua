@@ -26,9 +26,16 @@ EEex_Sprite_LoadedListeners = IEX_GetListeners('SpriteLoaded')
 function EEex_Sprite_LuaHook_OnAfterEffectListUnmarshalled(sprite)
 	if IEX_MarshalImport then IEX_MarshalImport(sprite) end
 end
+-- The creature's UUID (EEEX_UUID local) is set before the hook, as under EEex; EEex_Sprite_LoadedWithUUIDCallback
+-- callbacks for it run after the hook, before the mods' loaded listeners (lua/EEex_Sprite.lua).
 IEX_AddListener('SpriteLoaded', function(sprite)
+	if IEX_UUID_OnLoaded then
+		local ok, err = pcall(IEX_UUID_OnLoaded, sprite)
+		if not ok then IEX_Log('UUID: ' .. tostring(err)) end
+	end
 	local hook = EEex_Sprite_LuaHook_OnAfterEffectListUnmarshalled
 	if type(hook) == 'function' then hook(sprite) end
+	if IEX_UUID_RunCallbacks then IEX_UUID_RunCallbacks(sprite) end
 end)
 
 -- Keyboard: a key went down (repeats excluded). The listener receives the SDL keycode; returning true

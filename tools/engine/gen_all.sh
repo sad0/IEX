@@ -31,6 +31,7 @@ VERIFIED="$VERIFIED --verified $DATA/engine/win/verified_hd.json"
 VERIFIED="$VERIFIED --verified $DATA/engine/win/verified_fixes.json"
 VERIFIED="$VERIFIED --verified $DATA/engine/win/verified_kitlimit.json"
 VERIFIED="$VERIFIED --verified $DATA/engine/win/verified_fixes2.json"
+VERIFIED="$VERIFIED --verified $DATA/engine/win/verified_uuid.json"
 # Pathfinding Redux: CGameSprite search paint flags (m_bAddedToSearch-like at painted, "was painted" at repaint),
 # creature category (counter choice), CGameAnimationType::GetPersonalSpace vtable offset, CSearchBitmap private
 # snapshot pointer, CGameArea damage counter (CanSaveGame combat check, next to m_nBattleSongCounter).

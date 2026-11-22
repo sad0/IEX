@@ -644,6 +644,8 @@ local function registerOwn()
 			'toggle', 0, 'EEex', 'Uncap FPS Fullscreen VRR', 0, 1)
 		add('IEX_Options_VSync', 'VSync Enabled', 'Frames wait for the monitor refresh (no tearing). Off with no limit: as many frames as the PC can draw.',
 			'toggle', 1, 'EEex', 'VSync Enabled', 0, 1)
+		add('IEX_Options_ShowFps', 'Show FPS (IEX)', 'A small counter at the top right of the game screen shows the frames drawn per second.',
+			'toggle', 0, 'IEX', 'Show FPS', 0, 1)
 		add('IEX_Options_KeepSpeed', 'Keep Game Speed (IEX)', 'Mods that change the AI speed to get more frames (Tweaks Anthology Dynamic FPS: 60 out of combat) get the frames, not a faster game. Off: their change speeds the game up, as under EEex. BuffBot\'s fast mode always speeds the game up.',
 			'toggle', 1, 'IEX', 'Keep Game Speed', 0, 1)
 		add('IEX_Options_FrameInterpolation', 'Frame Interpolation (IEX)', 'Moving creatures and projectiles are drawn between their positions in the frames between AI updates.',

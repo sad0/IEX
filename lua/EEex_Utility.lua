@@ -2,8 +2,9 @@
 
 -- --- Bits (bit numbers start at 0; masks are tested whole) ---
 
-function EEex_IsBitSet(value, bit) return bit32.band(value, bit32.lshift(1, bit)) ~= 0 end
-function EEex_IsBitUnset(value, bit) return bit32.band(value, bit32.lshift(1, bit)) == 0 end
+local band, lshift = bit32.band, bit32.lshift  -- hot: thousands of calls per second with Tweaks Anthology
+function EEex_IsBitSet(value, bit) return band(value, lshift(1, bit)) ~= 0 end
+function EEex_IsBitUnset(value, bit) return band(value, lshift(1, bit)) == 0 end
 function EEex_SetBit(value, bit) return bit32.bor(value, bit32.lshift(1, bit)) end
 function EEex_UnsetBit(value, bit) return bit32.band(value, bit32.bnot(bit32.lshift(1, bit))) end
 function EEex_IsMaskSet(value, mask) return bit32.band(value, mask) == mask end
@@ -28,8 +29,9 @@ local STATE_DEAD = 0x800
 function EEex_GameObject_IsSprite(object, allowDead)
 	if not object or object.m_objectType ~= 0x31 then return false end
 	if allowDead then return true end
-	local sprite = EEex_GameObject_CastUserType(object)
-	return bit32.band(sprite.m_derivedStats.m_generalState, STATE_DEAD) == 0
+	-- An object already typed as a sprite (nearly every call) needs no cast
+	local stats = object.m_derivedStats or EEex_GameObject_CastUserType(object).m_derivedStats
+	return band(stats.m_generalState, STATE_DEAD) == 0
 end
 
 -- Per-object Lua table, kept for the object's address (mods store their own state there).

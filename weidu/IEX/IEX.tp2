@@ -4,7 +4,7 @@
 // so mods can test `MOD_IS_INSTALLED ~IEX/IEX.TP2~ ~0~`.
 BACKUP ~weidu_external/backup/IEX~
 AUTHOR ~sad0 (https://github.com/sad0/IEX-releases)~
-VERSION ~v0.4.1~
+VERSION ~v0.4.2~
 
 ALWAYS
   // Data tables and script names every EEex-dependent mod expects. Idempotent: existing files and IDS entries

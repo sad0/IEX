@@ -24,17 +24,104 @@ struct Box {
     const FieldKind* kind;
 };
 
+// The object metatable is also kept in the registry under this address: every field access reads it, and a light
+// userdata key needs no string hashing (mods read engine fields tens of thousands of times per second).
+char g_metaKey;
+
+void PushMeta(lua_State* L)
+{
+    lua.pushlightuserdata(L, &g_metaKey);
+    lua.rawget(L, LUA_REGISTRYINDEX);
+}
+
 void PushBox(lua_State* L, std::uintptr_t address, const TypeDesc* type, const FieldKind* kind)
 {
     auto* box = static_cast<Box*>(lua.newuserdata(L, sizeof(Box)));
     *box = Box{address, type, kind};
-    lua.L_newmetatable(L, kMeta);  // existing metatable after the first call
+    PushMeta(L);
     lua.setmetatable(L, -2);
+}
+
+const Box* TryBox(lua_State* L, int index)
+{
+    if (lua.type(L, index) != LUA_TUSERDATA)
+        return nullptr;
+    const auto* box = static_cast<const Box*>(lua.touserdata(L, index));
+    if (!lua.getmetatable(L, index))
+        return nullptr;
+    PushMeta(L);
+    const bool ours = lua.rawequal(L, -1, -2) != 0;
+    lua.settop(L, -3);
+    return ours ? box : nullptr;
 }
 
 Box* CheckBox(lua_State* L, int index)
 {
-    return static_cast<Box*>(lua.L_checkudata(L, index, kMeta));
+    if (const Box* box = TryBox(L, index))
+        return const_cast<Box*>(box);
+    return static_cast<Box*>(lua.L_checkudata(L, index, kMeta));  // raises the usual type error
+}
+
+// Field names resolved per (type, name). Lua interns short strings, so while the string stays alive its address
+// identifies the name: every cached name is anchored in a registry table, which also means an address can never be
+// reused by another name. A miss only costs the normal lookup, so long names and a full cache stay correct.
+struct FieldLookup {
+    const TypeDesc* type = nullptr;
+    const char* key = nullptr;
+    const FieldDesc* field = nullptr;
+    std::uint32_t offset = 0;
+    bool nodeList = false;      // m_pNodeHead / m_pNodeTail
+    signed char native = -1;    // a native method record of this name in the type chain: -1 not known yet
+};
+
+constexpr std::size_t kFieldCacheSize = 1u << 14;
+constexpr std::size_t kMaxInternedKey = 40;  // LUAI_MAXSHORTLEN
+constexpr int kMaxAnchoredKeys = 1 << 16;
+FieldLookup g_fieldCache[kFieldCacheSize];
+int g_anchoredKeys = 0;
+char g_anchorKey;
+
+FieldLookup* CacheSlot(const TypeDesc* type, const char* key)
+{
+    const std::uintptr_t a = reinterpret_cast<std::uintptr_t>(type) >> 4;
+    const std::uintptr_t b = reinterpret_cast<std::uintptr_t>(key) >> 3;
+    return &g_fieldCache[(a * 31 + b * 2654435761u) & (kFieldCacheSize - 1)];
+}
+
+bool AnchorKey(lua_State* L, int keyIndex)
+{
+    if (g_anchoredKeys >= kMaxAnchoredKeys)
+        return false;
+    lua.pushlightuserdata(L, &g_anchorKey);
+    lua.rawget(L, LUA_REGISTRYINDEX);
+    lua.pushvalue(L, keyIndex);
+    lua.rawget(L, -2);
+    const bool known = lua.type(L, -1) != LUA_TNIL;
+    lua.settop(L, -2);
+    if (!known) {
+        lua.pushvalue(L, keyIndex);
+        lua.pushboolean(L, 1);
+        lua.rawset(L, -3);
+        ++g_anchoredKeys;
+    }
+    lua.settop(L, -2);
+    return true;
+}
+
+// `keyIndex` is the absolute stack index of the name.
+FieldLookup LookupField(lua_State* L, const TypeDesc* type, const char* key, std::size_t length, int keyIndex)
+{
+    FieldLookup* slot = CacheSlot(type, key);
+    if (slot->type == type && slot->key == key)
+        return *slot;
+    FieldLookup found;
+    found.type = type;
+    found.key = key;
+    found.field = type->Find(key, found.offset);
+    found.nodeList = found.field && (!std::strcmp(key, "m_pNodeHead") || !std::strcmp(key, "m_pNodeTail"));
+    if (length <= kMaxInternedKey && AnchorKey(L, keyIndex))
+        *slot = found;
+    return found;
 }
 
 template <typename T>
@@ -219,21 +306,6 @@ int HandleSet(lua_State* L)
 }
 
 // Box at `index` if the value is one of our userdata (no error otherwise).
-const Box* TryBox(lua_State* L, int index)
-{
-    if (lua.type(L, index) != LUA_TUSERDATA)
-        return nullptr;
-    const int top = lua.gettop(L);
-    const Box* box = nullptr;
-    if (lua.getmetatable(L, index)) {
-        lua.L_newmetatable(L, kMeta);  // returns the existing one
-        if (lua.rawequal(L, -1, -2))
-            box = static_cast<const Box*>(lua.touserdata(L, index));
-    }
-    lua.settop(L, top);
-    return box;
-}
-
 int AbsIndex(lua_State* L, int index)
 {
     return index > 0 || index <= LUA_REGISTRYINDEX ? index : lua.gettop(L) + index + 1;
@@ -327,11 +399,25 @@ int ToluaBridge(lua_State* L)
 // (`CGameSprite.getPortraitIndex = function(self) ... end`); lookup walks the base classes. Pushes the method
 // and returns true when found. A C function of a tolua class table (the engine's own binding) is wrapped by
 // ToluaBridge; IEX's native methods (CallNativeMethod closures) and Lua functions are used as they are.
-bool PushMethod(lua_State* L, const TypeDesc* type, const char* key)
+bool HasNativeMethod(lua_State* L, const TypeDesc* type, const char* key)
+{
+    if (PushNativeMethod(L, type->name.c_str(), key)) {
+        lua.settop(L, -2);
+        return true;
+    }
+    for (const auto& [base, baseOffset] : type->bases) {
+        if (HasNativeMethod(L, base, key))
+            return true;
+    }
+    return false;
+}
+
+// `native` false: the type chain has no native record of this name (they never change after startup).
+bool PushMethod(lua_State* L, const TypeDesc* type, const char* key, bool native = true)
 {
     // Native records first: they bind the full C++ signature, as EEex does; the engine's tolua functions of the
     // same name may take fewer arguments (CScreenWorld::TogglePauseGame).
-    if (PushNativeMethod(L, type->name.c_str(), key))
+    if (native && PushNativeMethod(L, type->name.c_str(), key))
         return true;
     lua.getglobal(L, type->name.c_str());
     if (lua.type(L, -1) == LUA_TTABLE) {
@@ -347,7 +433,7 @@ bool PushMethod(lua_State* L, const TypeDesc* type, const char* key)
     }
     lua.settop(L, -2);
     for (const auto& [base, baseOffset] : type->bases) {
-        if (PushMethod(L, base, key))
+        if (PushMethod(L, base, key, native))
             return true;
     }
     return false;
@@ -409,7 +495,8 @@ void SetPeerField(lua_State* L, int ud, const char* key, int valueIndex)
 int MetaIndex(lua_State* L)
 {
     const Box* box = CheckBox(L, 1);
-    const char* key = lua.tolstring(L, 2, nullptr);
+    std::size_t keyLength = 0;
+    const char* key = lua.tolstring(L, 2, &keyLength);
     if (!key)
         LuaError(L, "IEX: field name must be a string");
     if (box->kind) {
@@ -446,9 +533,12 @@ int MetaIndex(lua_State* L)
             lua.pushnil(L);
         return 1;
     }
-    std::uint32_t offset = 0;
-    const FieldDesc* field = box->type ? box->type->Find(key, offset) : nullptr;
-    if (field && (!std::strcmp(key, "m_pNodeHead") || !std::strcmp(key, "m_pNodeTail"))) {
+    FieldLookup lookup;
+    if (box->type)
+        lookup = LookupField(L, box->type, key, keyLength, 2);
+    const FieldDesc* field = lookup.field;
+    const std::uint32_t offset = lookup.offset;
+    if (lookup.nodeList) {
         // A list class object (CGameEffectList...): its nodes' data are objects of the element type (as EEex).
         const TypeDesc* element = nullptr;
         for (const TypeDesc* t = box->type; t && !element; t = t->bases.empty() ? nullptr : t->bases[0].first)
@@ -462,8 +552,17 @@ int MetaIndex(lua_State* L)
         PushValue(L, box->address + offset, field->kind);
         return 1;
     }
-    if (box->type && PushMethod(L, box->type, key))
-        return 1;
+    if (box->type) {
+        bool native = lookup.native > 0;
+        if (lookup.native < 0) {
+            native = HasNativeMethod(L, box->type, key);
+            FieldLookup* slot = CacheSlot(box->type, key);
+            if (slot->type == box->type && slot->key == key)
+                slot->native = native ? 1 : 0;
+        }
+        if (PushMethod(L, box->type, key, native))
+            return 1;
+    }
     if (box->type && PushPeerField(L, 1, key))
         return 1;
     // `array:getReference(i).reference` (pointer arrays) is a pointer element reference (HandleGetReference);
@@ -475,15 +574,19 @@ int MetaIndex(lua_State* L)
 int MetaNewIndex(lua_State* L)
 {
     const Box* box = CheckBox(L, 1);
-    const char* key = lua.tolstring(L, 2, nullptr);
+    std::size_t keyLength = 0;
+    const char* key = lua.tolstring(L, 2, &keyLength);
     if (box->kind && key && box->kind->kind != Kind::Array && box->kind->kind != Kind::List &&
         box->kind->kind != Kind::Struct &&
         (box->kind->kind == Kind::Ptr ? !std::strcmp(key, "reference") : !std::strcmp(key, "value"))) {
         WriteValue(L, box->address, box->kind, 3);
         return 0;
     }
-    std::uint32_t offset = 0;
-    const FieldDesc* field = (key && box->type) ? box->type->Find(key, offset) : nullptr;
+    FieldLookup lookup;
+    if (key && box->type)
+        lookup = LookupField(L, box->type, key, keyLength, 2);
+    const FieldDesc* field = lookup.field;
+    const std::uint32_t offset = lookup.offset;
     if (!field && key && box->type && !box->kind) {
         // EEex: a name the class does not have is the mod's own field, kept with the object (IUI++'s radar
         // stores sprite.portrait, sprite.displayed_name... on the sprites it lists and reads them back)
@@ -654,7 +757,17 @@ const TypeDesc* ToObjectType(lua_State* L, int index)
 
 void OpenLuaObjects(lua_State* L)
 {
+    for (FieldLookup& entry : g_fieldCache)
+        entry = FieldLookup{};
+    g_anchoredKeys = 0;
+    lua.pushlightuserdata(L, &g_anchorKey);
+    lua.createtable(L, 0, 256);
+    lua.rawset(L, LUA_REGISTRYINDEX);
+
     lua.L_newmetatable(L, kMeta);
+    lua.pushlightuserdata(L, &g_metaKey);
+    lua.pushvalue(L, -2);
+    lua.rawset(L, LUA_REGISTRYINDEX);
     lua.pushcclosure(L, MetaIndex, 0);
     lua.setfield(L, -2, "__index");
     lua.pushcclosure(L, MetaNewIndex, 0);

@@ -272,3 +272,26 @@ menu
 		name 'IEXOPT_TEMPLATE_EscButton'
 	}
 }
+
+-- 'Show FPS' (Uncap FPS tab, Baldur.lua [IEX] 'Show FPS'): a small frame counter at the top right of the world
+-- screen, left of the portraits. Pushed only while the option is on (lua/IEX_FrameRate.lua); the first label's
+-- enabled check runs once per drawn frame and counts it.
+menu
+{
+	name 'IEX_FPS'
+	ignoreesc
+	label
+	{
+		area 0 0 0 0
+		enabled "IEX_ShowFpsTick()"
+	}
+	label
+	{
+		name 'IEX_FPS_TEXT'
+		area 0 0 0 0
+		enabled "IEX_ShowFpsVisible()"
+		text lua "IEX_ShowFps.text"
+		text style "normal"
+		text align right top
+	}
+}

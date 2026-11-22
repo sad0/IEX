@@ -5,7 +5,8 @@
 namespace iex {
 
 // The sprite whose SpriteLoaded listeners are running from inside its constructor (0 otherwise): its name and
-// most derived data are not set yet (IEX_SpriteName gives "" for it, like EEex).
+// most derived data are not set yet (IEX_SpriteName gives "" for it, like EEex). SpriteLoaded runs once the
+// creature is in the object array and its local variables and effect list are in place.
 extern std::uintptr_t g_spriteUnderConstruction;
 
 // Installs the engine hooks that feed IEX events (menu loaded, game state ready, sprite loaded, keys).
@@ -14,5 +15,9 @@ void InstallEventHooks();
 
 // True once the CGameObjectArray::Add call sites go through IEX (the objectIdRecycling engine fix needs it).
 bool ObjectArrayAddHooked();
+
+// The effect list of `sprite` has just been unmarshalled (CGameSprite::Unmarshal, marshal.cpp): its SpriteLoaded
+// event runs now if the creature is already in the object array, else when it is added.
+void SpriteEffectsUnmarshalled(std::uintptr_t sprite);
 
 } // namespace iex
